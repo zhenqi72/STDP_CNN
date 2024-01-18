@@ -45,13 +45,21 @@ class DoGFilter(nn.Module):
         g1 = np.exp(-((x**2 + y**2) / (2.0*sigma1**2))) * normal1
         g2 = np.exp(-((x**2 + y**2) / (2.0*sigma2**2))) * normal2
         # transfer to Tensor
-        return torch.from_numpy(g1).float(), torch.from_numpy(g2).float()           
+        g1 = torch.from_numpy(g1).float()
+        g2 = torch.from_numpy(g2).float()  
+        g1 = torch.unsqueeze(g1,0)
+        g2 = torch.unsqueeze(g2,0)
+        g1 = torch.unsqueeze(g1,0)
+        g2 = torch.unsqueeze(g2,0)
+        #print(g1.size())
+        return g1,g2          
         
     def forward(self, x):
         # create gaussin kernel
         self.weight1.data, self.weight2.data = self.DoG_kernel(self.sigma1, self.sigma2, self.kernel_size)
-        x1 = F.conv2d(x, self.weight1, self.stride, self.padding)
-        x2 = F.conv2d(x, self.weight2, self.stride, self.padding)
+        #print(self.weight1.data)
+        x1 = F.conv2d(input = x, weight=self.weight1)
+        x2 = F.conv2d(input = x, weight=self.weight2)
         x_on = x1 - x2 #on center filter 
         x_off = x2 - x1#off center filter
         x = torch.cat((x_on, x_off), dim=1)
@@ -80,7 +88,8 @@ class ConvNet_STDP(torch.nn.Module):
         self.features = int(((feature_size - 4) / 2 - 4) / 2)
         self.conv1 = torch.nn.Conv2d(2, 30, 5, 1)
         self.conv2 = torch.nn.Conv2d(30, 100, 5, 1)
-        self.fc1 = torch.nn.Linear(self.features * self.features * 100, 500)
+        self.fc1 = torch.nn.Linear(3200, 500)
+        self.gpool = torch.nn.AdaptiveMaxPool2d((1))
         self.out = LILinearCell(500, 10)
         self.lif0 = LIFCell(
             p=LIFParameters(method=method, alpha=torch.tensor(100.0),v_th= 15),
@@ -111,8 +120,8 @@ class ConvNet_STDP(torch.nn.Module):
             z = torch.nn.functional.max_pool2d(z, kernel_size = 2, stride = 2)
             z = 10 * self.conv2(z)
             z, s2 = self.lif1(z, s2)
-            z = torch.nn.AdaptiveMaxPool2d(z)
-            z = z.view(-1, 100)
+            z = self.gpool(z)
+            z = z.view(-1,3200)
             z = self.fc1(z)
             z, s3 = self.lif2(z, s3)
             v, so = self.out(torch.nn.functional.relu(z), so)
