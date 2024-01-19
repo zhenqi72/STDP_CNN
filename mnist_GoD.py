@@ -22,6 +22,7 @@ from norse.torch.functional.lif import LIFParameters
 from norse.torch.module.leaky_integrator import LILinearCell
 from norse.torch.module.lif import LIFCell
 import torch.nn.functional as F
+from norse.torch.functional.stdp import stdp_step_conv2d
 
 class DoGFilter(nn.Module):
     def __init__(self, in_channels, kernel_size,sigma1,sigma2, stride=1, padding=0):
@@ -86,11 +87,15 @@ class ConvNet_STDP(torch.nn.Module):
         
         self.dogfilter = DoGFilter(in_channels=num_channels, sigma1=1,sigma2=2,kernel_size=5)
         self.features = int(((feature_size - 4) / 2 - 4) / 2)
-        self.conv1 = torch.nn.Conv2d(2, 30, 5, 1)
-        self.conv2 = torch.nn.Conv2d(30, 100, 5, 1)
         self.fc1 = torch.nn.Linear(3200, 500)
         self.gpool = torch.nn.AdaptiveMaxPool2d((1))
         self.out = LILinearCell(500, 10)
+        self.w1 = torch.randn(2,5,5)
+        self.w2 = torch.randn(5,5)
+        self.w1 = torch.unsqueeze(self.w1,0)
+        self.w2 = torch.unsqueeze(self.w2,0)
+        self.w2 = torch.unsqueeze(self.w2,0)
+        
         self.lif0 = LIFCell(
             p=LIFParameters(method=method, alpha=torch.tensor(100.0),v_th= 15),
         )
@@ -98,6 +103,8 @@ class ConvNet_STDP(torch.nn.Module):
             p=LIFParameters(method=method, alpha=torch.tensor(100.0),v_th= 10),
         )
         self.lif2 = LIFCell(p=LIFParameters(method=method, alpha=torch.tensor(100.0)))
+        
+
         self.dtype = dtype
         
 
@@ -106,7 +113,7 @@ class ConvNet_STDP(torch.nn.Module):
         batch_size = x.shape[1]
 
         # specify the initial states
-        s0, s1, s2, s3, so = None, None, None, None,None
+        s0, s1, s2, s3,s4, so = None, None, None, None,None,None
 
         voltages = torch.zeros(
             seq_length, batch_size, 10, device=x.device, dtype=self.dtype
@@ -114,17 +121,21 @@ class ConvNet_STDP(torch.nn.Module):
         # ConvNet_STDP
         for ts in range(seq_length):
             z = self.dogfilter(x[ts, :])
-            z, s0 = self.lif0(z, s0)
-            z = self.conv1(z)
-            z, s1 = self.lif0(z, s1)
-            z = torch.nn.functional.max_pool2d(z, kernel_size = 2, stride = 2)
-            z = 10 * self.conv2(z)
-            z, s2 = self.lif1(z, s2)
-            z = self.gpool(z)
-            z = z.view(-1,3200)
-            z = self.fc1(z)
-            z, s3 = self.lif2(z, s3)
-            v, so = self.out(torch.nn.functional.relu(z), so)
+            z1, s0 = self.lif0(z, s0)            
+            z2 = F.conv2d(z1,self.w1)
+            z2, s1 = self.lif0(z2, s1)
+            self.w1,_  = stdp_step_conv2d(z1,z2,self.w1)  
+                      
+            z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)           
+            z4 = 10 * F.conv2d(z3,self.w2)
+            z4, s2 = self.lif1(z4, s2)
+            self.w2,_ = stdp_step_conv2d(z3,z4,self.w2)
+            
+            z4 = self.gpool(z4)
+            z4 = z4.view(-1,3200)
+            z4 = self.fc1(z4)
+            z4, s3 = self.lif2(z4, s3)
+            v, so = self.out(torch.nn.functional.relu(z4), so)
             voltages[ts, :, :] = v
         return voltages
 
