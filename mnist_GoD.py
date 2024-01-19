@@ -22,7 +22,9 @@ from norse.torch.functional.lif import LIFParameters
 from norse.torch.module.leaky_integrator import LILinearCell
 from norse.torch.module.lif import LIFCell
 import torch.nn.functional as F
+from norse.torch.functional.stdp import STDPState
 from norse.torch.functional.stdp import stdp_step_conv2d
+from norse.torch.functional.stdp import STDPParameters
 
 class DoGFilter(nn.Module):
     def __init__(self, in_channels, kernel_size,sigma1,sigma2, stride=1, padding=0):
@@ -84,12 +86,13 @@ class ConvNet_STDP(torch.nn.Module):
         dtype=torch.float
     ):
         super(ConvNet_STDP, self).__init__()
-        
         self.dogfilter = DoGFilter(in_channels=num_channels, sigma1=1,sigma2=2,kernel_size=5)
         self.features = int(((feature_size - 4) / 2 - 4) / 2)
         self.fc1 = torch.nn.Linear(3200, 500)
         self.gpool = torch.nn.AdaptiveMaxPool2d((1))
         self.out = LILinearCell(500, 10)
+        self.p_stdp1 = STDPParameters()
+        self.p_stdp2 = STDPParameters()
         self.w1 = torch.randn(2,5,5)
         self.w2 = torch.randn(5,5)
         self.w1 = torch.unsqueeze(self.w1,0)
@@ -120,21 +123,38 @@ class ConvNet_STDP(torch.nn.Module):
         )
         # ConvNet_STDP
         for ts in range(seq_length):
+            #dog filter
             z = self.dogfilter(x[ts, :])
-            z1, s0 = self.lif0(z, s0)            
+            z1, s0 = self.lif0(z, s0)
+
+            #first conv layer
             z2 = F.conv2d(z1,self.w1)
             z2, s1 = self.lif0(z2, s1)
-            self.w1,_  = stdp_step_conv2d(z1,z2,self.w1)  
-                      
-            z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)           
+            if self.t_pre1 is None:
+                self.t_pre1 = torch.zeros((z1.shape[0],z1.shape[1],z1.shape[2],z1.shape[3]))
+            if self.t_post1 is None:
+                self.t_post1 = torch.zeros((z2.shape[0],z2.shape[1],z2.shape[2],z2.shape[3]))
+            self.w1,_  = stdp_step_conv2d(z1,z2,self.w1,STDPState(self.t_pre1,self.t_post1))  
+
+            #max pooling layer          
+            z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)
+
+            #second conv layer
             z4 = 10 * F.conv2d(z3,self.w2)
             z4, s2 = self.lif1(z4, s2)
-            self.w2,_ = stdp_step_conv2d(z3,z4,self.w2)
-            
+            if self.t_pre2 is None:
+                self.t_pre2 = torch.zeros((z3.shape[0],z3.shape[1],z3.shape[2],z3.shape[3]))
+            if self.t_post2 is None:
+                self.t_post2 = torch.zeros((z4.shape[0],z4.shape[1],z4.shape[2],z4.shape[3]))
+            self.w2,_ = stdp_step_conv2d(z3,z4,self.w2,STDPState(self.t_pre2,self.t_post2))
+
+            #global pooling layer
             z4 = self.gpool(z4)
             z4 = z4.view(-1,3200)
+            #full connect layer
             z4 = self.fc1(z4)
             z4, s3 = self.lif2(z4, s3)
+
             v, so = self.out(torch.nn.functional.relu(z4), so)
             voltages[ts, :, :] = v
         return voltages
