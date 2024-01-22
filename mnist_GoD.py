@@ -22,9 +22,8 @@ from norse.torch.functional.lif import LIFParameters
 from norse.torch.module.leaky_integrator import LILinearCell
 from norse.torch.module.lif import LIFCell
 import torch.nn.functional as F
-from norse.torch.functional.stdp import STDPState
-from norse.torch.functional.stdp import stdp_step_conv2d
-from norse.torch.functional.stdp import STDPParameters
+from norse.torch.functional.stdp import (STDPState,stdp_step_conv2d,STDPParameters)
+
 
 class DoGFilter(nn.Module):
     def __init__(self, in_channels, kernel_size,sigma1,sigma2, stride=1, padding=0):
@@ -36,36 +35,38 @@ class DoGFilter(nn.Module):
         self.sigma1 = sigma1
         self.sigma2 = sigma2
         # initiate
-        self.weight1 = nn.Parameter(torch.randn(1, in_channels, kernel_size, kernel_size))
-        self.weight2 = nn.Parameter(torch.randn(1, in_channels, kernel_size, kernel_size))
+        self.conv1 = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=5)
+        self.conv2 = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=5)
+        self.weight1 = nn.Parameter(torch.randn(1, in_channels, kernel_size, kernel_size),requires_grad = False)
+        self.weight2 = nn.Parameter(torch.randn(1, in_channels, kernel_size, kernel_size),requires_grad = False)
         
         #create gaussin kernel 
     def DoG_kernel(self, sigma1, sigma2, size):
-        size = int(size) // 2
-        x, y = np.mgrid[-size:size+1, -size:size+1]
-        normal1 = 1 / (2.0 * np.pi * sigma1**2)
-        normal2 = 1 / (2.0 * np.pi * sigma2**2)
-        g1 = np.exp(-((x**2 + y**2) / (2.0*sigma1**2))) * normal1
-        g2 = np.exp(-((x**2 + y**2) / (2.0*sigma2**2))) * normal2
+        ax = torch.arange(-size // 2 + 1., size // 2 + 1.)
+        xx, yy = torch.meshgrid(ax, ax)
+        g1 = torch.exp(-(xx**2 + yy**2) / (2 * sigma1**2))
+        g1 = g1/g1.sum()
+        g2 = torch.exp(-(xx**2 + yy**2) / (2 * sigma2**2))
+        g2 = g2/g2.sum()
         # transfer to Tensor
-        g1 = torch.from_numpy(g1).float()
-        g2 = torch.from_numpy(g2).float()  
-        g1 = torch.unsqueeze(g1,0)
-        g2 = torch.unsqueeze(g2,0)
-        g1 = torch.unsqueeze(g1,0)
-        g2 = torch.unsqueeze(g2,0)
-        #print(g1.size())
+        g1 = g1.view(1,1,5,5)
+        g2 = g2.view(1,1,5,5)
+        
+        #print("g1",g1)
+        #print("g2",g2)
         return g1,g2          
         
     def forward(self, x):
         # create gaussin kernel
         self.weight1.data, self.weight2.data = self.DoG_kernel(self.sigma1, self.sigma2, self.kernel_size)
-        #print(self.weight1.data)
-        x1 = F.conv2d(input = x, weight=self.weight1)
-        x2 = F.conv2d(input = x, weight=self.weight2)
+        self.conv1.weight = self.weight1
+        self.conv2.weight = self.weight2
+        x1 = self.conv1(x)
+        x2 = self.conv2(x)
         x_on = x1 - x2 #on center filter 
         x_off = x2 - x1#off center filter
         x = torch.cat((x_on, x_off), dim=1)
+        #print("x size",x.size())
         return x
           
 class ConvNet_STDP(torch.nn.Module):
@@ -91,13 +92,28 @@ class ConvNet_STDP(torch.nn.Module):
         self.fc1 = torch.nn.Linear(3200, 500)
         self.gpool = torch.nn.AdaptiveMaxPool2d((1))
         self.out = LILinearCell(500, 10)
-        self.p_stdp1 = STDPParameters()
-        self.p_stdp2 = STDPParameters()
-        self.w1 = torch.randn(2,5,5)
-        self.w2 = torch.randn(5,5)
-        self.w1 = torch.unsqueeze(self.w1,0)
-        self.w2 = torch.unsqueeze(self.w2,0)
-        self.w2 = torch.unsqueeze(self.w2,0)
+        
+        self.conv2d1 = nn.Conv2d(in_channels=2,out_channels=30,kernel_size=5,bias = False)
+        self.conv2d2 = nn.Conv2d(in_channels=30,out_channels=100,kernel_size=5,bias = False)
+        
+        self.stdp_param1 = STDPParameters(
+            eta_plus=0.004,
+            eta_minus=0.003,
+            stdp_algorithm="multiplicative_relu",
+            convolutional = True,
+            mu=0)
+        self.stdp_param2 = STDPParameters(
+            eta_plus=0.004,
+            eta_minus=0.003,
+            stdp_algorithm="multiplicative_relu",
+            convolutional = True,
+            mu=0)
+        self.w1 = torch.randn(30,2,5,5)        
+        #self.w1 = torch.unsqueeze(self.w1,0)
+        self.w2 = torch.randn(100,30,5,5)
+        #self.w2 = self.w2.view(100,30,5,5)
+        self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
+        self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
         
         self.lif0 = LIFCell(
             p=LIFParameters(method=method, alpha=torch.tensor(100.0),v_th= 15),
@@ -106,7 +122,6 @@ class ConvNet_STDP(torch.nn.Module):
             p=LIFParameters(method=method, alpha=torch.tensor(100.0),v_th= 10),
         )
         self.lif2 = LIFCell(p=LIFParameters(method=method, alpha=torch.tensor(100.0)))
-        
 
         self.dtype = dtype
         
@@ -117,46 +132,50 @@ class ConvNet_STDP(torch.nn.Module):
 
         # specify the initial states
         s0, s1, s2, s3,s4, so = None, None, None, None,None,None
+        t_pre1,t_pre2,t_post1,t_post2 = None,None,None,None
 
         voltages = torch.zeros(
             seq_length, batch_size, 10, device=x.device, dtype=self.dtype
         )
         # ConvNet_STDP
-        for ts in range(seq_length):
-            #dog filter
-            z = self.dogfilter(x[ts, :])
-            z1, s0 = self.lif0(z, s0)
+        with torch.no_grad():
+            for ts in range(seq_length):
+                #dog filter
+                z = self.dogfilter(x[ts, :])                
+                #first conv layer
+                z2 = self.conv2d1(z)
+                z2, s1 = self.lif0(z2, s1)
+                if t_pre1 == None:
+                    t_pre1 =torch.zeros((z.shape[0], z.shape[1], z.shape[2], z.shape[3]))
+                if t_post1 == None:
+                    t_post1 =  torch.zeros((z2.shape[0], z2.shape[1], z2.shape[2], z2.shape[3]))
+                                                       
+                self.w1,_  = stdp_step_conv2d(z,z2,self.w1,STDPState(t_pre1,t_post1),p_stdp= self.stdp_param1)
+                self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False) 
 
-            #first conv layer
-            z2 = F.conv2d(z1,self.w1)
-            z2, s1 = self.lif0(z2, s1)
-            if self.t_pre1 is None:
-                self.t_pre1 = torch.zeros((z1.shape[0],z1.shape[1],z1.shape[2],z1.shape[3]))
-            if self.t_post1 is None:
-                self.t_post1 = torch.zeros((z2.shape[0],z2.shape[1],z2.shape[2],z2.shape[3]))
-            self.w1,_  = stdp_step_conv2d(z1,z2,self.w1,STDPState(self.t_pre1,self.t_post1))  
+                #max pooling layer          
+                z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)
 
-            #max pooling layer          
-            z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)
+                #second conv layer
+                z4 = 10 * self.conv2d2(z3)
+                z4, s2 = self.lif1(z4, s2)
+                if t_pre2 == None:
+                    t_pre2 =torch.zeros((z3.shape[0], z3.shape[1], z3.shape[2], z3.shape[3]))
+                if t_post2== None:
+                    t_post2 =  torch.zeros((z4.shape[0], z4.shape[1], z4.shape[2], z4.shape[3]))
+                                    
+                self.w2,_ = stdp_step_conv2d(z3,z4,self.w2,STDPState(t_pre2,t_post2),p_stdp= self.stdp_param2)
+                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
 
-            #second conv layer
-            z4 = 10 * F.conv2d(z3,self.w2)
-            z4, s2 = self.lif1(z4, s2)
-            if self.t_pre2 is None:
-                self.t_pre2 = torch.zeros((z3.shape[0],z3.shape[1],z3.shape[2],z3.shape[3]))
-            if self.t_post2 is None:
-                self.t_post2 = torch.zeros((z4.shape[0],z4.shape[1],z4.shape[2],z4.shape[3]))
-            self.w2,_ = stdp_step_conv2d(z3,z4,self.w2,STDPState(self.t_pre2,self.t_post2))
-
-            #global pooling layer
-            z4 = self.gpool(z4)
-            z4 = z4.view(-1,3200)
-            #full connect layer
-            z4 = self.fc1(z4)
-            z4, s3 = self.lif2(z4, s3)
-
-            v, so = self.out(torch.nn.functional.relu(z4), so)
-            voltages[ts, :, :] = v
+                #global pooling layer
+                z4 = self.gpool(z4)
+                z4 = z4.view(-1,3200)
+                #print("size of z4",z4.size())
+                #full connect layer
+                z4 = self.fc1(z4)
+                z4, s3 = self.lif2(z4, s3)
+                v, so = self.out(torch.nn.functional.relu(z4), so)
+                voltages[ts, :, :] = v
         return voltages
 
 class LIFConvNet(torch.nn.Module):
