@@ -166,14 +166,17 @@ class ConvNet_STDP(torch.nn.Module):
                                     
                 self.w2,_ = stdp_step_conv2d(z3,z4,self.w2,STDPState(t_pre2,t_post2),p_stdp= self.stdp_param2)
                 self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
-
+                
                 #global pooling layer
-                z4 = self.gpool(z4)
-                z4 = z4.view(-1,3200)
+                z4 = self.gpool(z4)    
+                          
+                z4 = z4.view(-1,100)
+                print("size of z4",z4.size())   
                 #print("size of z4",z4.size())
-                #full connect layer
-                z4 = self.fc1(z4)
-                z4, s3 = self.lif2(z4, s3)
+                #full connect layer                
+                z4 = self.fc1(z4)    
+                           
+                #z4, s3 = self.lif2(z4, s3)
                 v, so = self.out(torch.nn.functional.relu(z4), so)
                 voltages[ts, :, :] = v
         return voltages
@@ -191,7 +194,7 @@ class LIFConvNet(torch.nn.Module):
         self.constant_current_encoder = ConstantCurrentLIFEncoder(seq_length=seq_length)
         self.only_first_spike = only_first_spike
         self.input_features = input_features
-        self.rsnn = ConvNet_STDP(method=model)
+        self.cnn = ConvNet_STDP(method=model)
         self.seq_length = seq_length
         self.input_scale = input_scale
 
@@ -212,7 +215,9 @@ class LIFConvNet(torch.nn.Module):
             x = torch.from_numpy(zeros).to(x.device)
 
         x = x.reshape(self.seq_length, batch_size, 1, 28, 28)
-        voltages = self.rsnn(x)
+        voltages = self.cnn(x)
+        #print("voltage size is",voltages.size())
+        #print("volt is",voltages[0,:,:])
         m, _ = torch.max(voltages, 0)
         log_p_y = torch.nn.functional.log_softmax(m, dim=1)
         return log_p_y
