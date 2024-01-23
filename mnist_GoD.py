@@ -26,7 +26,7 @@ from norse.torch.functional.stdp import (STDPState,stdp_step_conv2d,STDPParamete
 
 
 class DoGFilter(nn.Module):
-    def __init__(self, in_channels, kernel_size,sigma1,sigma2, stride=1, padding=0):
+    def __init__(self, in_channels, kernel_size,sigma1,sigma2, stride=1, padding=(2,2)):
         super(DoGFilter, self).__init__()
         self.in_channels = in_channels
         self.kernel_size = kernel_size
@@ -35,10 +35,14 @@ class DoGFilter(nn.Module):
         self.sigma1 = sigma1
         self.sigma2 = sigma2
         # initiate
-        self.conv1 = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=5)
-        self.conv2 = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=5)
+        self.conv1 = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=5,padding=self.padding)
+        self.conv2 = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=5,padding=self.padding)
         self.weight1 = nn.Parameter(torch.randn(1, in_channels, kernel_size, kernel_size),requires_grad = False)
         self.weight2 = nn.Parameter(torch.randn(1, in_channels, kernel_size, kernel_size),requires_grad = False)
+
+        self.weight1.data, self.weight2.data = self.DoG_kernel(self.sigma1, self.sigma2, self.kernel_size)
+        self.conv1.weight = self.weight1
+        self.conv2.weight = self.weight2
         
         #create gaussin kernel 
     def DoG_kernel(self, sigma1, sigma2, size):
@@ -51,22 +55,16 @@ class DoGFilter(nn.Module):
         # transfer to Tensor
         g1 = g1.view(1,1,5,5)
         g2 = g2.view(1,1,5,5)
-        
-        #print("g1",g1)
-        #print("g2",g2)
         return g1,g2          
         
     def forward(self, x):
         # create gaussin kernel
-        self.weight1.data, self.weight2.data = self.DoG_kernel(self.sigma1, self.sigma2, self.kernel_size)
-        self.conv1.weight = self.weight1
-        self.conv2.weight = self.weight2
         x1 = self.conv1(x)
         x2 = self.conv2(x)
         x_on = x1 - x2 #on center filter 
         x_off = x2 - x1#off center filter
         x = torch.cat((x_on, x_off), dim=1)
-        #print("x size",x.size())
+        print("x size",x.size())
         return x
           
 class ConvNet_STDP(torch.nn.Module):
@@ -87,6 +85,7 @@ class ConvNet_STDP(torch.nn.Module):
         dtype=torch.float
     ):
         super(ConvNet_STDP, self).__init__()
+        self.train_SNN = True
         self.dogfilter = DoGFilter(in_channels=num_channels, sigma1=1,sigma2=2,kernel_size=5)
         self.features = int(((feature_size - 4) / 2 - 4) / 2)
         self.fc1 = torch.nn.Linear(100, 50)
@@ -140,45 +139,41 @@ class ConvNet_STDP(torch.nn.Module):
         for ts in range(seq_length):
             #dog filter
             with torch.no_grad():
-                z = self.dogfilter(x[ts, :])                
+                #z = self.dogfilter(x[ts, :]) 
                 #first conv layer
-                z2 = self.conv2d1(z)
+                z2 = self.conv2d1(x[ts, :])                
                 z2, s1 = self.lif0(z2, s1)
-                if t_pre1 == None:
-                    t_pre1 =torch.zeros((z.shape[0], z.shape[1], z.shape[2], z.shape[3]))
-                if t_post1 == None:
-                    t_post1 =  torch.zeros((z2.shape[0], z2.shape[1], z2.shape[2], z2.shape[3]))
-                                                    
-                self.w1,_  = stdp_step_conv2d(z,z2,self.w1,STDPState(t_pre1,t_post1),p_stdp= self.stdp_param1)
-                self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False) 
 
                 #max pooling layer          
                 z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)
 
                 #second conv layer
                 z4 = 10 * self.conv2d2(z3)
-                z4, s2 = self.lif1(z4, s2)
+                z5, s2 = self.lif1(z4, s2)                                     
+               
+                #global pooling layer
+                z5 = self.gpool(z5)    
+                z5 = z5.view(-1,100)
+
+                if t_pre1 == None:
+                    t_pre1 =torch.zeros((x[ts, :].shape[0], x[ts, :].shape[1], x[ts, :].shape[2], x[ts, :].shape[3]))
+                if t_post1 == None:
+                    t_post1 =  torch.zeros((z2.shape[0], z2.shape[1], z2.shape[2], z2.shape[3]))
+                self.w1,_  = stdp_step_conv2d(x[ts, :],z2,self.w1,STDPState(t_pre1,t_post1),p_stdp= self.stdp_param1)
+                self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False) 
                 if t_pre2 == None:
-                    t_pre2 =torch.zeros((z3.shape[0], z3.shape[1], z3.shape[2], z3.shape[3]))
+                        t_pre2 =torch.zeros((z3.shape[0], z3.shape[1], z3.shape[2], z3.shape[3]))
                 if t_post2== None:
                     t_post2 =  torch.zeros((z4.shape[0], z4.shape[1], z4.shape[2], z4.shape[3]))
-                                    
                 self.w2,_ = stdp_step_conv2d(z3,z4,self.w2,STDPState(t_pre2,t_post2),p_stdp= self.stdp_param2)
-                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
-                
-                #global pooling layer
-                z4 = self.gpool(z4)    
-                        
-                z4 = z4.view(-1,100)
-            #print("size of z4",z4.size())   
-            #full connect layer                
-            z4 = self.fc1(z4)    
+                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False) 
+
+            #full connect layer                   
+            z5 = self.fc1(z5)    
                         
             #z4, s3 = self.lif2(z4, s3)
-            v, so = self.out(torch.nn.functional.relu(z4), so)
+            v, so = self.out(torch.nn.functional.relu(z5), so)
             voltages[ts, :, :] = v
-            #print("voltage is",v)
-            #print("voltage size is",voltages.size())
         return voltages
 
 class LIFConvNet(torch.nn.Module):
@@ -200,8 +195,9 @@ class LIFConvNet(torch.nn.Module):
 
     def forward(self, x):
         batch_size = x.shape[0]
+
         x = self.constant_current_encoder(
-            x.view(-1, self.input_features) * self.input_scale
+            x.view(-1,2,self.input_features) * self.input_scale
         )
         if self.only_first_spike:
             # delete all spikes except for first
@@ -214,11 +210,10 @@ class LIFConvNet(torch.nn.Module):
                     spike_counter[batch, nrn] += 1
             x = torch.from_numpy(zeros).to(x.device)
 
-        x = x.reshape(self.seq_length, batch_size, 1, 28, 28)
+        x = x.reshape(self.seq_length, batch_size, 2, 28, 28)
         voltages = self.cnn(x)
         m, index = torch.max(voltages, 0)        
         log_p_y = torch.nn.functional.log_softmax(m, dim=1)
-        #print("log_p_y is",log_p_y)
         return log_p_y
 
 def train(
@@ -241,13 +236,15 @@ def train(
 
     batch_len = len(train_loader)
     step = batch_len * epoch
+    dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
 
     for batch_idx, (data, target) in enumerate(train_loader):
+        data = dogfilter(data)
+        print("data after dog",data)
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
-        #print("output is",output)
-        #print("target is",target)
+        #if train_classifier:
         loss = torch.nn.functional.nll_loss(output, target)
         loss.backward()
 
@@ -258,14 +255,17 @@ def train(
         step += 1
 
         if batch_idx % log_interval == 0:
+            _, argmax = torch.max(output, 1)
+            accuracy = (target == argmax.squeeze()).float().mean()
             print(
-                "Train Epoch: {}/{} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+                "Train Epoch: {}/{} [{}/{} ({:.0f}%)]\tLoss: {:.6f},Accuracy: {:.6f}".format(
                     epoch,
                     epochs,
                     batch_idx * len(data),
                     len(train_loader.dataset),
                     100.0 * batch_idx / len(train_loader),
                     loss.item(),
+                    accuracy.item()
                 )
             )
 
@@ -521,7 +521,7 @@ if __name__ == "__main__":
         "--epochs", type=int, default=10, help="Number of training episodes to do."
     )
     parser.add_argument(
-        "--seq-length", type=int, default=200, help="Number of timesteps to do."
+        "--seq-length", type=int, default=50, help="Number of timesteps to do."
     )
     parser.add_argument(
         "--batch-size",
