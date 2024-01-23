@@ -89,9 +89,9 @@ class ConvNet_STDP(torch.nn.Module):
         super(ConvNet_STDP, self).__init__()
         self.dogfilter = DoGFilter(in_channels=num_channels, sigma1=1,sigma2=2,kernel_size=5)
         self.features = int(((feature_size - 4) / 2 - 4) / 2)
-        self.fc1 = torch.nn.Linear(3200, 500)
+        self.fc1 = torch.nn.Linear(100, 50)
         self.gpool = torch.nn.AdaptiveMaxPool2d((1))
-        self.out = LILinearCell(500, 10)
+        self.out = LILinearCell(50, 10)
         
         self.conv2d1 = nn.Conv2d(in_channels=2,out_channels=30,kernel_size=5,bias = False)
         self.conv2d2 = nn.Conv2d(in_channels=30,out_channels=100,kernel_size=5,bias = False)
@@ -108,10 +108,8 @@ class ConvNet_STDP(torch.nn.Module):
             stdp_algorithm="multiplicative_relu",
             convolutional = True,
             mu=0)
-        self.w1 = torch.randn(30,2,5,5)        
-        #self.w1 = torch.unsqueeze(self.w1,0)
+        self.w1 = torch.randn(30,2,5,5)   
         self.w2 = torch.randn(100,30,5,5)
-        #self.w2 = self.w2.view(100,30,5,5)
         self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
         self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
         
@@ -138,9 +136,10 @@ class ConvNet_STDP(torch.nn.Module):
             seq_length, batch_size, 10, device=x.device, dtype=self.dtype
         )
         # ConvNet_STDP
-        with torch.no_grad():
-            for ts in range(seq_length):
-                #dog filter
+        
+        for ts in range(seq_length):
+            #dog filter
+            with torch.no_grad():
                 z = self.dogfilter(x[ts, :])                
                 #first conv layer
                 z2 = self.conv2d1(z)
@@ -149,7 +148,7 @@ class ConvNet_STDP(torch.nn.Module):
                     t_pre1 =torch.zeros((z.shape[0], z.shape[1], z.shape[2], z.shape[3]))
                 if t_post1 == None:
                     t_post1 =  torch.zeros((z2.shape[0], z2.shape[1], z2.shape[2], z2.shape[3]))
-                                                       
+                                                    
                 self.w1,_  = stdp_step_conv2d(z,z2,self.w1,STDPState(t_pre1,t_post1),p_stdp= self.stdp_param1)
                 self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False) 
 
@@ -169,16 +168,17 @@ class ConvNet_STDP(torch.nn.Module):
                 
                 #global pooling layer
                 z4 = self.gpool(z4)    
-                          
+                        
                 z4 = z4.view(-1,100)
-                print("size of z4",z4.size())   
-                #print("size of z4",z4.size())
-                #full connect layer                
-                z4 = self.fc1(z4)    
-                           
-                #z4, s3 = self.lif2(z4, s3)
-                v, so = self.out(torch.nn.functional.relu(z4), so)
-                voltages[ts, :, :] = v
+            #print("size of z4",z4.size())   
+            #full connect layer                
+            z4 = self.fc1(z4)    
+                        
+            #z4, s3 = self.lif2(z4, s3)
+            v, so = self.out(torch.nn.functional.relu(z4), so)
+            voltages[ts, :, :] = v
+            #print("voltage is",v)
+            #print("voltage size is",voltages.size())
         return voltages
 
 class LIFConvNet(torch.nn.Module):
@@ -216,10 +216,9 @@ class LIFConvNet(torch.nn.Module):
 
         x = x.reshape(self.seq_length, batch_size, 1, 28, 28)
         voltages = self.cnn(x)
-        #print("voltage size is",voltages.size())
-        #print("volt is",voltages[0,:,:])
-        m, _ = torch.max(voltages, 0)
+        m, index = torch.max(voltages, 0)        
         log_p_y = torch.nn.functional.log_softmax(m, dim=1)
+        #print("log_p_y is",log_p_y)
         return log_p_y
 
 def train(
@@ -247,6 +246,8 @@ def train(
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
+        #print("output is",output)
+        #print("target is",target)
         loss = torch.nn.functional.nll_loss(output, target)
         loss.backward()
 
