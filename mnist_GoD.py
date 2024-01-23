@@ -23,6 +23,7 @@ from norse.torch.module.leaky_integrator import LILinearCell
 from norse.torch.module.lif import LIFCell
 import torch.nn.functional as F
 from norse.torch.functional.stdp import (STDPState,stdp_step_conv2d,STDPParameters)
+import cv2
 
 
 class DoGFilter(nn.Module):
@@ -240,6 +241,9 @@ def train(
 
     for batch_idx, (data, target) in enumerate(train_loader):
         data = dogfilter(data)
+        cv2.imshow(data[0,:].detach().numpy())  
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()       
         print("data after dog",data)
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
