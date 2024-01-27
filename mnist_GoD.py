@@ -13,61 +13,21 @@ import torch
 import torch.utils.data
 from torch.utils.tensorboard import SummaryWriter
 import torchvision
+import torch.nn as nn
+import torch.nn.functional as F
 
 from norse.torch.models.conv import ConvNet4
 from norse.torch.module.encode import ConstantCurrentLIFEncoder
-
-import torch.nn as nn
 from norse.torch.functional.lif import LIFParameters
 from norse.torch.module.lif import LIFCell
 from norse.torch.module.leaky_integrator import LILinearCell
 from norse.torch.module.iaf import IAFCell,IAFParameters
-import torch.nn.functional as F
 from norse.torch.functional.stdp import (STDPState,stdp_step_conv2d,STDPParameters)
+from norse.torch.functional.encode import spike_latency_encode
+
+from DoGFilter_copy  import DoGFilter
+#from DoGFilter  import DoGFilter
 import cv2
-
-
-class DoGFilter(nn.Module):
-    def __init__(self, in_channels, kernel_size,sigma1,sigma2, stride=1, padding=(2,2)):
-        super(DoGFilter, self).__init__()
-        self.in_channels = in_channels
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        self.sigma1 = sigma1
-        self.sigma2 = sigma2
-        # initiate
-        self.conv1 = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=5,padding=self.padding)
-        self.conv2 = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=5,padding=self.padding)
-        self.weight1 = nn.Parameter(torch.randn(1, in_channels, kernel_size, kernel_size),requires_grad = False)
-        self.weight2 = nn.Parameter(torch.randn(1, in_channels, kernel_size, kernel_size),requires_grad = False)
-
-        self.weight1.data, self.weight2.data = self.DoG_kernel(self.sigma1, self.sigma2, self.kernel_size)
-        self.conv1.weight = self.weight1
-        self.conv2.weight = self.weight2
-        
-        #create gaussin kernel 
-    def DoG_kernel(self, sigma1, sigma2, size):
-        ax = torch.arange(-size // 2 + 1., size // 2 + 1.)
-        xx, yy = torch.meshgrid(ax, ax)
-        g1 = torch.exp(-(xx**2 + yy**2) / (2 * sigma1**2))
-        g1 = g1/g1.sum()
-        g2 = torch.exp(-(xx**2 + yy**2) / (2 * sigma2**2))
-        g2 = g2/g2.sum()
-        # transfer to Tensor
-        g1 = g1.view(1,1,5,5)
-        g2 = g2.view(1,1,5,5)
-        return g1,g2          
-        
-    def forward(self, x):
-        # create gaussin kernel
-        x1 = self.conv1(x)
-        x2 = self.conv2(x)
-        x_on = x1 - x2 #on center filter 
-        x_off = x2 - x1#off center filter
-        x = torch.cat((x_on, x_off), dim=1)
-        print("x size",x.size())
-        return x
           
 class ConvNet_STDP(torch.nn.Module):
     """
@@ -93,22 +53,20 @@ class ConvNet_STDP(torch.nn.Module):
         self.gpool = torch.nn.AdaptiveMaxPool2d((1))
         self.out = LILinearCell(50, 10)
         
-        self.conv2d1 = nn.Conv2d(in_channels=1,out_channels=30,kernel_size=5,bias = False)
+        self.conv2d1 = nn.Conv2d(in_channels=2,out_channels=30,kernel_size=5,bias = False)
         self.conv2d2 = nn.Conv2d(in_channels=30,out_channels=100,kernel_size=5,bias = False)
         
         self.stdp_param1 = STDPParameters(
-            #tau_pre_inv=torch.as_tensor(1/0.05),
-            #tau_post_inv=torch.as_tensor(1/0.05),
-            eta_plus=0.00004,
-            eta_minus=0.00003,
+            eta_plus=0.004,
+            eta_minus=-0.003,
             stdp_algorithm="additive",
             convolutional = True,
             ) #mu=0
         self.stdp_param2 = STDPParameters(
             #tau_pre_inv=torch.as_tensor(1/0.05),
             #tau_post_inv=torch.as_tensor(1/0.05),
-            eta_plus=0.00004,
-            eta_minus=0.00003,
+            eta_plus=0.004,
+            eta_minus=-0.003,
             stdp_algorithm="additive",
             convolutional = True,
             )#mu=0
@@ -118,10 +76,10 @@ class ConvNet_STDP(torch.nn.Module):
         self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
         
         self.lif0 = IAFCell(
-            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= 50),
+            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= 15),
         )
         self.lif1 = IAFCell(
-            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= 15),
+            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= 10),
         )
 
         self.dtype = dtype
@@ -164,9 +122,7 @@ class ConvNet_STDP(torch.nn.Module):
                     t_pre1 =torch.zeros((x[ts, :].shape[0], x[ts, :].shape[1], x[ts, :].shape[2], x[ts, :].shape[3])) 
                     state1 = STDPState(t_pre1,t_post1)               
 
-                self.w1,state1  = stdp_step_conv2d(x[ts, :],z2,self.w1,state1,p_stdp= self.stdp_param1)
-                #print("state1",state1.t_post[1,:])
-                print("self.w1 is",self.w1[1,:])  
+                self.w1,state1  = stdp_step_conv2d(x[ts, :],z2,self.w1,state1,p_stdp= self.stdp_param1) 
                 self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False) 
 
                 if state2 == None:
@@ -176,8 +132,7 @@ class ConvNet_STDP(torch.nn.Module):
 
                 self.w2,state2 = stdp_step_conv2d(z3,z5,self.w2,state2,p_stdp= self.stdp_param2)
                 self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False) 
-                #print("state2",state2.t_post[1,:])
-                #print("self.w2 is",self.w2[1,1,:]) 
+                
 
             z6 = z6.view(-1,100)
             #full connect layer                   
@@ -207,10 +162,11 @@ class LIFConvNet(torch.nn.Module):
 
     def forward(self, x):
         batch_size = x.shape[0]
-
         x = self.constant_current_encoder(
             x.view(-1,2,self.input_features) * self.input_scale
         )
+        #print("x after encode",x[0,0,:])
+        x = spike_latency_encode(x)
         if self.only_first_spike:
             # delete all spikes except for first
             zeros = torch.zeros_like(x.cpu()).detach().numpy()
@@ -246,55 +202,59 @@ def train(
     model.train()
     losses = []
 
+    add_classifier = 0
+
     batch_len = len(train_loader)
     step = batch_len * epoch
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
 
     for batch_idx, (data, target) in enumerate(train_loader):
-        #data = dogfilter(data)
-        #torch.set_printoptions(threshold=1000)        
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        #print("output",output[1,:])  
-        #if train_classifier:
-        loss = torch.nn.functional.nll_loss(output, target)
-        loss.backward()
+        print("data after DoG filter",data)
+        data = dogfilter.forward(data)        
+        #torch.set_printoptions(threshold=1000)
+        if add_classifier :        
+            data, target = data.to(device), target.to(device)
+            optimizer.zero_grad()
+            output = model(data)
+            #print("output",output[1,:])  
+            #if train_classifier:
+            loss = torch.nn.functional.nll_loss(output, target)
+            loss.backward()
 
-        if clip_grad:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_value)
+            if clip_grad:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_value)
 
-        optimizer.step()
-        step += 1
+            optimizer.step()
+            step += 1
 
-        if batch_idx % log_interval == 0:
-            _, argmax = torch.max(output, 1)
-            accuracy = (target == argmax.squeeze()).float().mean()
-            print(
-                "Train Epoch: {}/{} [{}/{} ({:.0f}%)]\tLoss: {:.6f},Accuracy: {:.6f}".format(
-                    epoch,
-                    epochs,
-                    batch_idx * len(data),
-                    len(train_loader.dataset),
-                    100.0 * batch_idx / len(train_loader),
-                    loss.item(),
-                    accuracy.item()
-                )
-            )
-
-        if step % log_interval == 0:
-            _, argmax = torch.max(output, 1)
-            accuracy = (target == argmax.squeeze()).float().mean()
-            writer.add_scalar("Loss/train", loss.item(), step)
-            writer.add_scalar("Accuracy/train", accuracy.item(), step)
-
-            for tag, value in model.named_parameters():
-                tag = tag.replace(".", "/")
-                writer.add_histogram(tag, value.data.cpu().numpy(), step)
-                if value.grad is not None:
-                    writer.add_histogram(
-                        tag + "/grad", value.grad.data.cpu().numpy(), step
+            if batch_idx % log_interval == 0:
+                _, argmax = torch.max(output, 1)
+                accuracy = (target == argmax.squeeze()).float().mean()
+                print(
+                    "Train Epoch: {}/{} [{}/{} ({:.0f}%)]\tLoss: {:.6f},Accuracy: {:.6f}".format(
+                        epoch,
+                        epochs,
+                        batch_idx * len(data),
+                        len(train_loader.dataset),
+                        100.0 * batch_idx / len(train_loader),
+                        loss.item(),
+                        accuracy.item()
                     )
+                )
+
+            if step % log_interval == 0:
+                _, argmax = torch.max(output, 1)
+                accuracy = (target == argmax.squeeze()).float().mean()
+                writer.add_scalar("Loss/train", loss.item(), step)
+                writer.add_scalar("Accuracy/train", accuracy.item(), step)
+
+                for tag, value in model.named_parameters():
+                    tag = tag.replace(".", "/")
+                    writer.add_histogram(tag, value.data.cpu().numpy(), step)
+                    if value.grad is not None:
+                        writer.add_histogram(
+                            tag + "/grad", value.grad.data.cpu().numpy(), step
+                        )
 
         if do_plot and batch_idx % plot_interval == 0:
             ts = np.arange(0, seq_length)
@@ -308,11 +268,13 @@ def train(
             fig.ylabel("Membrane Potential")
 
             writer.add_figure("Voltages/output", fig, step)
-
-        losses.append(loss.item())
-
-    mean_loss = np.mean(losses)
-    return losses, mean_loss
+        if add_classifier == 1:
+            losses.append(loss.item())
+    if add_classifier == 1:
+        mean_loss = np.mean(losses)
+        return losses, mean_loss
+    else:
+        return 1,2
 
 
 def test(model, device, test_loader, epoch, method, writer):
@@ -385,14 +347,14 @@ def main(args):
             transform=torchvision.transforms.Compose(
                 [
                     torchvision.transforms.ToTensor(),
-                    torchvision.transforms.Normalize((0.1307,), (0.3081,)),
+                    
                 ]
             ),
         ),
         batch_size=args.batch_size,
         shuffle=True,
         **kwargs,
-    )
+    )#torchvision.transforms.Normalize((0.1307,), (0.3081,))
     test_loader = torch.utils.data.DataLoader(
         torchvision.datasets.MNIST(
             root=".",
@@ -580,7 +542,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-save-interval",
         type=int,
-        default=50,
+        default=15,
         help="Save model every so many epochs.",
     )
     parser.add_argument(
