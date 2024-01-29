@@ -26,6 +26,7 @@ from norse.torch.functional.stdp import (STDPState,stdp_step_conv2d,STDPParamete
 from norse.torch.functional.encode import spike_latency_encode
 
 from DoGFilter_copy  import DoGFilter
+from SVM_classifier import hinge_loss,MultiClassSVM
 #from DoGFilter  import DoGFilter
 import cv2
           
@@ -41,7 +42,7 @@ class ConvNet_STDP(torch.nn.Module):
 
     def __init__(
         self, 
-        num_channels=1, 
+        num_channels=2, 
         feature_size=24, 
         method="super", 
         dtype=torch.float
@@ -55,31 +56,36 @@ class ConvNet_STDP(torch.nn.Module):
         
         self.conv2d1 = nn.Conv2d(in_channels=2,out_channels=30,kernel_size=5,bias = False)
         self.conv2d2 = nn.Conv2d(in_channels=30,out_channels=100,kernel_size=5,bias = False)
+        self.conv2d3 = nn.Conv2d(in_channels=100,out_channels=10,kernel_size=5,bias = False)
+        self.svm = MultiClassSVM(input_size=,num_classes=10)
         
         self.stdp_param1 = STDPParameters(
             eta_plus=0.004,
-            eta_minus=-0.003,
+            eta_minus=0.003,
             stdp_algorithm="additive",
             convolutional = True,
-            ) #mu=0
+            ) 
         self.stdp_param2 = STDPParameters(
-            #tau_pre_inv=torch.as_tensor(1/0.05),
-            #tau_post_inv=torch.as_tensor(1/0.05),
             eta_plus=0.004,
-            eta_minus=-0.003,
+            eta_minus=0.003,
             stdp_algorithm="additive",
             convolutional = True,
-            )#mu=0
-        self.w1 = torch.randn(30,1,5,5)   
+            )
+        self.w1 = torch.randn(30,2,5,5)   
         self.w2 = torch.randn(100,30,5,5)
+        self.w3 = torch.randn(10,100,5,5)
         self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
         self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
+        self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
         
         self.lif0 = IAFCell(
             p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= 15),
         )
         self.lif1 = IAFCell(
             p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= 10),
+        )
+        self.lif1 = IAFCell(
+            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= np.inf),
         )
 
         self.dtype = dtype
@@ -123,7 +129,9 @@ class ConvNet_STDP(torch.nn.Module):
                     state1 = STDPState(t_pre1,t_post1)               
 
                 self.w1,state1  = stdp_step_conv2d(x[ts, :],z2,self.w1,state1,p_stdp= self.stdp_param1) 
-                self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False) 
+                self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
+                #print("w1.5 is",self.w1[5,:]) 
+                #print("w1.8 is",self.w1[8,:]) 
 
                 if state2 == None:
                     t_pre2 =torch.zeros((z3.shape[0], z3.shape[1], z3.shape[2], z3.shape[3]))
@@ -131,8 +139,7 @@ class ConvNet_STDP(torch.nn.Module):
                     state2 = STDPState(t_pre2,t_post2)
 
                 self.w2,state2 = stdp_step_conv2d(z3,z5,self.w2,state2,p_stdp= self.stdp_param2)
-                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False) 
-                
+                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)                              
 
             z6 = z6.view(-1,100)
             #full connect layer                   
@@ -163,9 +170,8 @@ class LIFConvNet(torch.nn.Module):
     def forward(self, x):
         batch_size = x.shape[0]
         x = self.constant_current_encoder(
-            x.view(-1,2,self.input_features) * self.input_scale
+            x.view(-1,self.input_features) * self.input_scale
         )
-        #print("x after encode",x[0,0,:])
         x = spike_latency_encode(x)
         if self.only_first_spike:
             # delete all spikes except for first
@@ -178,7 +184,7 @@ class LIFConvNet(torch.nn.Module):
                     spike_counter[batch, nrn] += 1
             x = torch.from_numpy(zeros).to(x.device)
 
-        x = x.reshape(self.seq_length, batch_size, 1, 28, 28)
+        x = x.reshape(self.seq_length, batch_size, 2, 28, 28)
         voltages = self.cnn(x)
         m, index = torch.max(voltages, 0)        
         log_p_y = torch.nn.functional.log_softmax(m, dim=1)
@@ -202,23 +208,21 @@ def train(
     model.train()
     losses = []
 
-    add_classifier = 0
+    add_classifier = 1
 
     batch_len = len(train_loader)
     step = batch_len * epoch
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
 
-    for batch_idx, (data, target) in enumerate(train_loader):
-        print("data after DoG filter",data)
-        data = dogfilter.forward(data)        
-        #torch.set_printoptions(threshold=1000)
+    for batch_idx, (data, target) in enumerate(train_loader):        
+        data = dogfilter(data)       
+        #print("data after DoG filter",data) 
         if add_classifier :        
             data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(data)
-            #print("output",output[1,:])  
-            #if train_classifier:
-            loss = torch.nn.functional.nll_loss(output, target)
+            loss = hinge_loss(output, target)  
+            #loss = torch.nn.functional.nll_loss(output, target)
             loss.backward()
 
             if clip_grad:
@@ -346,10 +350,11 @@ def main(args):
             download=True,
             transform=torchvision.transforms.Compose(
                 [
-                    torchvision.transforms.ToTensor(),
+                    torchvision.transforms.PILToTensor(),
                     
                 ]
             ),
+            
         ),
         batch_size=args.batch_size,
         shuffle=True,
@@ -361,14 +366,14 @@ def main(args):
             train=False,
             transform=torchvision.transforms.Compose(
                 [
-                    torchvision.transforms.ToTensor(),
-                    torchvision.transforms.Normalize((0.1307,), (0.3081,)),
+                    torchvision.transforms.PILToTensor(),
+                    
                 ]
             ),
         ),
         batch_size=args.batch_size,
         **kwargs,
-    )
+    )#torchvision.transforms.Normalize((0.1307,), (0.3081,)),
 
     input_features = 28 * 28
 
