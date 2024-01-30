@@ -1,3 +1,8 @@
+from DoGFilter import DoGFilter
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+
 r"""
 In this task, we train a spiking convolutional network to learn the
 MNIST digit recognition task.
@@ -63,13 +68,13 @@ class ConvNet_STDP(torch.nn.Module):
         self.stdp_param1 = STDPParameters(
             eta_plus=0.004,
             eta_minus=0.003,
-            stdp_algorithm="additive",
+            stdp_algorithm="simple",
             convolutional = True,
             ) 
         self.stdp_param2 = STDPParameters(
             eta_plus=0.004,
             eta_minus=0.003,
-            stdp_algorithm="additive",
+            stdp_algorithm="simple",
             convolutional = True,
             )
         self.w1 = torch.randn(30,2,5,5)   
@@ -149,7 +154,7 @@ class ConvNet_STDP(torch.nn.Module):
             #z4, s3 = self.lif2(z4, s3)
             v, so = self.out(torch.nn.functional.relu(z6), so)
             voltages[ts, :, :] = v
-        return voltages
+        return voltages,self.w1,self.w2
 
 class LIFConvNet(torch.nn.Module):
     def __init__(
@@ -177,101 +182,10 @@ class LIFConvNet(torch.nn.Module):
         x = x.reshape(self.seq_length, batch_size, 2, 28, 28)
         x = spike_latency_encode(x)
         x = x.reshape(self.seq_length, batch_size, 2, 28, 28)
-        voltages = self.cnn(x)
+        voltages,w1,w2 = self.cnn(x)
         m, index = torch.max(voltages, 0)        
         log_p_y = torch.nn.functional.log_softmax(m, dim=1)
-        return log_p_y
-
-def train(
-    model,
-    device,
-    train_loader,
-    optimizer,
-    epoch,
-    clip_grad,
-    grad_clip_value,
-    epochs,
-    log_interval,
-    do_plot,
-    plot_interval,
-    seq_length,
-    writer,
-):
-    model.train()
-    losses = []
-
-    add_classifier = 1
-
-    batch_len = len(train_loader)
-    step = batch_len * epoch
-    dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
-
-    for batch_idx, (data, target) in enumerate(train_loader):        
-        data = dogfilter(data)       
-        #print("data after DoG filter",data) 
-              
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        if add_classifier :      
-            loss = hinge_loss(output, target)  
-            #loss = torch.nn.functional.nll_loss(output, target)
-            loss.backward()
-
-            if clip_grad:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_value)
-
-            optimizer.step()
-            step += 1
-
-            if batch_idx % log_interval == 0:
-                _, argmax = torch.max(output, 1)
-                accuracy = (target == argmax.squeeze()).float().mean()
-                print(
-                    "Train Epoch: {}/{} [{}/{} ({:.0f}%)]\tLoss: {:.6f},Accuracy: {:.6f}".format(
-                        epoch,
-                        epochs,
-                        batch_idx * len(data),
-                        len(train_loader.dataset),
-                        100.0 * batch_idx / len(train_loader),
-                        loss.item(),
-                        accuracy.item()
-                    )
-                )
-
-            if step % log_interval == 0:
-                _, argmax = torch.max(output, 1)
-                accuracy = (target == argmax.squeeze()).float().mean()
-                writer.add_scalar("Loss/train", loss.item(), step)
-                writer.add_scalar("Accuracy/train", accuracy.item(), step)
-
-                for tag, value in model.named_parameters():
-                    tag = tag.replace(".", "/")
-                    writer.add_histogram(tag, value.data.cpu().numpy(), step)
-                    if value.grad is not None:
-                        writer.add_histogram(
-                            tag + "/grad", value.grad.data.cpu().numpy(), step
-                        )
-
-        if do_plot and batch_idx % plot_interval == 0:
-            ts = np.arange(0, seq_length)
-            fig, axs = plt.subplots(4, 4, figsize=(15, 10), sharex=True, sharey=True)
-            axs = axs.reshape(-1)  # flatten
-            for nrn in range(10):
-                one_trace = model.voltages.detach().cpu().numpy()[:, 0, nrn]
-                fig.sca(axs[nrn])
-                fig.plot(ts, one_trace)
-            fig.xlabel("Time [s]")
-            fig.ylabel("Membrane Potential")
-
-            writer.add_figure("Voltages/output", fig, step)
-        if add_classifier == 1:
-            losses.append(loss.item())
-    if add_classifier == 1:
-        mean_loss = np.mean(losses)
-        return losses, mean_loss
-    else:
-        return output,output
+        return log_p_y,w1,w2
 
 def train_snn(
     model,
@@ -279,6 +193,7 @@ def train_snn(
     train_loader,
     optimizer,
     epoch,
+    epochs,
     do_plot,
     plot_interval,
     seq_length,
@@ -295,7 +210,16 @@ def train_snn(
               
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
-        output = model(data)
+        output,w1,w2 = model(data)
+        print(
+                    "Train Epoch: {}/{} [{}/{} ({:.0f}%)] ".format(
+                        epoch,
+                        epochs,
+                        batch_idx * len(data),
+                        len(train_loader.dataset),
+                        100.0 * batch_idx / len(train_loader)                    
+                    )
+                )
 
         if do_plot and batch_idx % plot_interval == 0:
             ts = np.arange(0, seq_length)
@@ -309,9 +233,8 @@ def train_snn(
             fig.ylabel("Membrane Potential")
 
             writer.add_figure("Voltages/output", fig, step)
-        
     
-    return output
+    return output,w1,w2
 
 
 
@@ -327,33 +250,6 @@ def save(path, epoch, model, optimizer, is_best=False):
         path,
     )
 
-def test(model, device, test_loader, epoch, method, writer):
-    model.eval()
-    test_loss = 0
-    correct = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            test_loss += torch.nn.functional.nll_loss(
-                output, target, reduction="sum"
-            ).item()  # sum up batch loss
-            pred = output.argmax(
-                dim=1, keepdim=True
-            )  # get the index of the max log-probability
-            correct += pred.eq(target.view_as(pred)).sum().item()
-
-    test_loss /= len(test_loader.dataset)
-
-    accuracy = 100.0 * correct / len(test_loader.dataset)
-    print(
-        f"\nTest set {method}: Average loss: {test_loss:.4f}, \
-            Accuracy: {correct}/{len(test_loader.dataset)} ({accuracy:.0f}%)\n"
-    )
-    writer.add_scalar("Loss/test", test_loss, epoch)
-    writer.add_scalar("Accuracy/test", accuracy, epoch)
-
-    return test_loss, accuracy
 
 def load(path, model, optimizer):
     checkpoint = torch.load(path)
@@ -393,20 +289,6 @@ def main(args):
         shuffle=True,
         **kwargs,
     )#torchvision.transforms.Normalize((0.1307,), (0.3081,))
-    test_loader = torch.utils.data.DataLoader(
-        torchvision.datasets.MNIST(
-            root=".",
-            train=False,
-            transform=torchvision.transforms.Compose(
-                [
-                    torchvision.transforms.PILToTensor(),
-                    
-                ]
-            ),
-        ),
-        batch_size=args.batch_size,
-        **kwargs,
-    )#torchvision.transforms.Normalize((0.1307,), (0.3081,)),
 
     input_features = 28 * 28
 
@@ -427,59 +309,29 @@ def main(args):
     if args.only_output:
         optimizer = torch.optim.Adam(model.out.parameters(), lr=args.learning_rate)
 
-    training_losses = []
-    mean_losses = []
-    test_losses = []
-    accuracies = []
-
     for epoch in range(args.epochs):
-        training_loss, mean_loss = train(
+        output,w1,w2 = train_snn(
             model,
             device,
             train_loader,
             optimizer,
             epoch,
-            clip_grad=args.clip_grad,
-            grad_clip_value=args.grad_clip_value,
             epochs=args.epochs,
-            log_interval=args.log_interval,
             do_plot=args.do_plot,
             plot_interval=args.plot_interval,
             seq_length=args.seq_length,
             writer=writer,
         )
-        test_loss, accuracy = test(
-            model, device, test_loader, epoch, method=args.method, writer=writer
-        )
+    np.save("w1.npy", np.array(w1))
+    np.save("w2.npy", np.array(w2))
+       
 
-        training_losses += training_loss
-        mean_losses.append(mean_loss)
-        test_losses.append(test_loss)
-        accuracies.append(accuracy)
-
-        max_accuracy = np.max(np.array(accuracies))
-
-        if (epoch % args.model_save_interval == 0) and args.save_model:
-            model_path = f"mnist-{epoch}.pt"
-            save(
-                model_path,
-                model=model,
-                optimizer=optimizer,
-                epoch=epoch,
-                is_best=accuracy > max_accuracy,
-            )
-
-    np.save("training_losses.npy", np.array(training_losses))
-    np.save("mean_losses.npy", np.array(mean_losses))
-    np.save("test_losses.npy", np.array(test_losses))
-    np.save("accuracies.npy", np.array(accuracies))
-    model_path = "mnist-final.pt"
+    model_path = "mnist-snn.pt"    
     save(
         model_path,
         epoch=epoch,
         model=model,
-        optimizer=optimizer,
-        is_best=accuracy > max_accuracy,
+        optimizer=optimizer
     )
 
 
@@ -531,7 +383,7 @@ if __name__ == "__main__":
         help="Device to use by pytorch.",
     )
     parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of training episodes to do."
+        "--epochs", type=int, default=2, help="Number of training episodes to do."
     )
     parser.add_argument(
         "--seq-length", type=int, default=30, help="Number of timesteps to do."
