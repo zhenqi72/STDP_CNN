@@ -123,7 +123,7 @@ class ConvNet_STDP(torch.nn.Module):
                 z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)
 
                 #second conv layer
-                z4 = 10 * self.conv2d2(z3)
+                z4 = self.conv2d2(z3)
                 z5, s2 = self.if1(z4, s2)                                     
                
                 #global pooling layer
@@ -136,7 +136,7 @@ class ConvNet_STDP(torch.nn.Module):
 
                 self.w1,state1  = stdp_step_conv2d(x[ts, :],z2,self.w1,state1,p_stdp= self.stdp_param1) 
                 self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
-                
+
 
                 if state2 == None:
                     t_pre2 =torch.zeros((z3.shape[0], z3.shape[1], z3.shape[2], z3.shape[3]))
