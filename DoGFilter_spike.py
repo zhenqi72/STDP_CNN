@@ -39,6 +39,7 @@ class DoGFilter(nn.Module):
         x2 = self.conv2(x)
         x_on = x1 - x2 #on center filter 
         x_off = x2 - x1#off center filter
+        
         x = torch.cat((x_on, x_off), dim=1)
         #print("x size",x.size())
         return x

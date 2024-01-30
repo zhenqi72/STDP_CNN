@@ -56,8 +56,8 @@ class ConvNet_STDP(torch.nn.Module):
         
         self.conv2d1 = nn.Conv2d(in_channels=2,out_channels=30,kernel_size=5,bias = False)
         self.conv2d2 = nn.Conv2d(in_channels=30,out_channels=100,kernel_size=5,bias = False)
-        self.conv2d3 = nn.Conv2d(in_channels=100,out_channels=10,kernel_size=5,bias = False)
-        self.svm = MultiClassSVM(input_size=,num_classes=10)
+        #self.conv2d3 = nn.Conv2d(in_channels=100,out_channels=100,kernel_size=5,bias = False)
+        self.svm = MultiClassSVM(input_size=self.features,num_classes=10)
         
         self.stdp_param1 = STDPParameters(
             eta_plus=0.004,
@@ -73,18 +73,18 @@ class ConvNet_STDP(torch.nn.Module):
             )
         self.w1 = torch.randn(30,2,5,5)   
         self.w2 = torch.randn(100,30,5,5)
-        self.w3 = torch.randn(10,100,5,5)
+        #self.w3 = torch.randn(100,100,5,5)
         self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
         self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
-        self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
+        #self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
         
-        self.lif0 = IAFCell(
+        self.if0 = IAFCell(
             p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= 15),
         )
-        self.lif1 = IAFCell(
+        self.if1 = IAFCell(
             p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= 10),
         )
-        self.lif1 = IAFCell(
+        self.if2 = IAFCell(
             p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= np.inf),
         )
 
@@ -104,21 +104,21 @@ class ConvNet_STDP(torch.nn.Module):
             seq_length, batch_size, 10, device=x.device, dtype=self.dtype
         )
         # ConvNet_STDP
-        
+    
         for ts in range(seq_length):
             #dog filter
             with torch.no_grad():
                 
                 #first conv layer
                 z2 = self.conv2d1(x[ts, :])                
-                z2, s1 = self.lif0(z2, s1)
+                z2, s1 = self.if0(z2, s1)
 
                 #max pooling layer          
                 z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)
 
                 #second conv layer
                 z4 = 10 * self.conv2d2(z3)
-                z5, s2 = self.lif1(z4, s2)                                     
+                z5, s2 = self.if1(z4, s2)                                     
                
                 #global pooling layer
                 z6 = self.gpool(z5)    
@@ -139,7 +139,9 @@ class ConvNet_STDP(torch.nn.Module):
                     state2 = STDPState(t_pre2,t_post2)
 
                 self.w2,state2 = stdp_step_conv2d(z3,z5,self.w2,state2,p_stdp= self.stdp_param2)
-                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)                              
+                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
+                print("w2.5 is",self.w1[5,:]) 
+                print("w2.8 is",self.w1[8,:])                               
 
             z6 = z6.view(-1,100)
             #full connect layer                   
@@ -173,17 +175,6 @@ class LIFConvNet(torch.nn.Module):
             x.view(-1,self.input_features) * self.input_scale
         )
         x = spike_latency_encode(x)
-        if self.only_first_spike:
-            # delete all spikes except for first
-            zeros = torch.zeros_like(x.cpu()).detach().numpy()
-            idxs = x.cpu().nonzero().detach().numpy()
-            spike_counter = np.zeros((batch_size, 28 * 28))
-            for t, batch, nrn in idxs:
-                if spike_counter[batch, nrn] == 0:
-                    zeros[t, batch, nrn] = 1
-                    spike_counter[batch, nrn] += 1
-            x = torch.from_numpy(zeros).to(x.device)
-
         x = x.reshape(self.seq_length, batch_size, 2, 28, 28)
         voltages = self.cnn(x)
         m, index = torch.max(voltages, 0)        
@@ -208,7 +199,7 @@ def train(
     model.train()
     losses = []
 
-    add_classifier = 1
+    add_classifier = 0
 
     batch_len = len(train_loader)
     step = batch_len * epoch
@@ -501,12 +492,12 @@ if __name__ == "__main__":
         "--epochs", type=int, default=10, help="Number of training episodes to do."
     )
     parser.add_argument(
-        "--seq-length", type=int, default=50, help="Number of timesteps to do."
+        "--seq-length", type=int, default=30, help="Number of timesteps to do."
     )
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=32,
+        default=1,
         help="Number of examples in one minibatch.",
     )
     parser.add_argument(
