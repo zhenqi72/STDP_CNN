@@ -31,7 +31,7 @@ from norse.torch.functional.stdp import (STDPState,stdp_step_conv2d,STDPParamete
 from norse.torch.functional.encode import spike_latency_encode
 
 from DoGFilter_copy  import DoGFilter
-from SVM_classifier import hinge_loss,MultiClassSVM
+from SVM_classifier import multiclass_hinge_loss,MultiClassSVM
 #from DoGFilter  import DoGFilter
 import cv2
 
@@ -48,22 +48,32 @@ class ConvNet_STDP(torch.nn.Module):
 
     def __init__(
         self, 
-        num_channels=2, 
-        feature_size=24, 
+        num_channels=1, 
+        feature_size=[240,160], 
         method="super", 
         dtype=torch.float
     ):
         super(ConvNet_STDP, self).__init__()
         self.train_SNN = True
-        self.features = int(((feature_size - 4) / 2 - 4) / 2)
+        #convolution parameters
+        self.ken_size1 =5
+        self.ken_size2 =16
+        self.ken_size3 =5
+        self.pool_strd1 =6
+        self.pool_strd2 =2
+        self.pool_size1 =7
+        self.pool_size2 =2
+        
         self.fc1 = torch.nn.Linear(100, 50)
+        self.maxpool1 = torch.nn.MaxPool2d((self.pool_size1,self.pool_size1),self.pool_strd1)
+        self.maxpool2 = torch.nn.MaxPool2d((self.pool_size1,self.pool_size1),self.pool_strd2)
         self.gpool = torch.nn.AdaptiveMaxPool2d((1))
         self.out = LILinearCell(50, 10)
         
-        self.conv2d1 = nn.Conv2d(in_channels=2,out_channels=30,kernel_size=5,bias = False)
-        self.conv2d2 = nn.Conv2d(in_channels=30,out_channels=100,kernel_size=5,bias = False)
-        #self.conv2d3 = nn.Conv2d(in_channels=100,out_channels=100,kernel_size=5,bias = False)
-        self.svm = MultiClassSVM(input_size=self.features,num_classes=10)
+        self.conv2d1 = nn.Conv2d(in_channels=num_channels,out_channels=4,kernel_size=self.ken_size1,bias = False)
+        self.conv2d2 = nn.Conv2d(in_channels=4,out_channels=20,kernel_size=self.ken_size2,bias = False)
+        self.conv2d3 = nn.Conv2d(in_channels=20,out_channels=10,kernel_size=self.ken_size3,bias = False)
+        self.svm = MultiClassSVM(input_size=10,num_classes=2)
         
         self.stdp_param1 = STDPParameters(
             eta_plus=0.004,
@@ -77,21 +87,28 @@ class ConvNet_STDP(torch.nn.Module):
             stdp_algorithm="simple",
             convolutional = True,
             )
-        self.w1 = torch.randn(30,2,5,5)   
-        self.w2 = torch.randn(100,30,5,5)
-        #self.w3 = torch.randn(100,100,5,5)
+        self.stdp_param3 = STDPParameters(
+            eta_plus=0.004,
+            eta_minus=0.003,
+            stdp_algorithm="simple",
+            convolutional = True,
+            ) 
+        
+        self.w1 = torch.randn(4,1,5,5)   
+        self.w2 = torch.randn(20,4,16,16)
+        self.w3 = torch.randn(10,20,5,5)
         self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
         self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
-        #self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
+        self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
         
-        self.if0 = IAFCell(
-            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= torch.tensor(15)),
-        )
         self.if1 = IAFCell(
             p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= torch.tensor(10)),
         )
         self.if2 = IAFCell(
-            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= np.inf),
+            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= torch.tensor(60)),
+        )
+        self.if3 = IAFCell(
+            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= torch.tensor(2)),
         )
 
         self.dtype = dtype
@@ -104,7 +121,7 @@ class ConvNet_STDP(torch.nn.Module):
         # specify the initial states
         s0, s1, s2, s3,s4, so = None, None, None, None,None,None
         t_pre1,t_pre2,t_post1,t_post2 = None,None,None,None
-        state1,state2 = None,None
+        state1,state2,state3 = None,None,None
 
         voltages = torch.zeros(
             seq_length, batch_size, 10, device=x.device, dtype=self.dtype
@@ -116,43 +133,52 @@ class ConvNet_STDP(torch.nn.Module):
             with torch.no_grad():
                 
                 #first conv layer
-                z2 = self.conv2d1(x[ts, :])                
-                z2, s1 = self.if0(z2, s1)
-
-                #max pooling layer          
-                z3 = torch.nn.functional.max_pool2d(z2, kernel_size = 2, stride = 2)
+                print("size of x",x[ts, :].shape)  
+                z2 = self.conv2d1(x[ts, :])              
+                z2, s1 = self.if1(z2, s1)         
+                z3 = self.maxpool1(z2)
 
                 #second conv layer
                 z4 = self.conv2d2(z3)
-                z5, s2 = self.if1(z4, s2)                                     
-               
-                #global pooling layer
-                z6 = self.gpool(z5)    
+                z5, s2 = self.if2(z4, s2)                                     
+                z6 = self.maxpool2(z5)
+                
+                #third conv layer
+                z7 = self.conv2d3(z6)
+                z8, s3 = self.if3(z7,s3)
+                z9 = self.gpool(z8)     
 
                 if state1 == None:                    
                     t_post1 =  torch.zeros((z2.shape[0], z2.shape[1], z2.shape[2], z2.shape[3]))
-                    t_pre1 =torch.zeros((x[ts, :].shape[0], x[ts, :].shape[1], x[ts, :].shape[2], x[ts, :].shape[3])) 
-                    state1 = STDPState(t_pre1,t_post1)               
+                    t_pre1  =  torch.zeros((x[ts, :].shape[0], x[ts, :].shape[1], x[ts, :].shape[2], x[ts, :].shape[3])) 
+                    state1  =  STDPState(t_pre1,t_post1)               
 
                 self.w1,state1  = stdp_step_conv2d(x[ts, :],z2,self.w1,state1,p_stdp= self.stdp_param1) 
                 self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
 
 
                 if state2 == None:
-                    t_pre2 =torch.zeros((z3.shape[0], z3.shape[1], z3.shape[2], z3.shape[3]))
-                    t_post2 =  torch.zeros((z5.shape[0], z5.shape[1], z5.shape[2], z5.shape[3]))
-                    state2 = STDPState(t_pre2,t_post2)
+                    t_pre2  = torch.zeros((z3.shape[0], z3.shape[1], z3.shape[2], z3.shape[3]))
+                    t_post2 = torch.zeros((z5.shape[0], z5.shape[1], z5.shape[2], z5.shape[3]))
+                    state2  = STDPState(t_pre2,t_post2)
 
                 self.w2,state2 = stdp_step_conv2d(z3,z5,self.w2,state2,p_stdp= self.stdp_param2)
                 self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
+                
+                if state3 == None:
+                    t_pre3  = torch.zeros((z6.shape[0], z6.shape[1], z6.shape[2], z6.shape[3]))
+                    t_post3 = torch.zeros((z8.shape[0], z8.shape[1], z8.shape[2], z8.shape[3]))
+                    state3  = STDPState(t_pre3,t_post3)
+
+                self.w3,state3 = stdp_step_conv2d(z6,z8,self.w3,state3,p_stdp= self.stdp_param3)
+                self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
                                               
 
-            z6 = z6.view(-1,100)
+            z9 = z9.view(-1,10)
             #full connect layer                   
-            z6 = self.fc1(z6)    
+            z9 = self.fc1(z9)    
                         
-            #z4, s3 = self.lif2(z4, s3)
-            v, so = self.out(torch.nn.functional.relu(z6), so)
+            v, so = self.out(torch.nn.functional.relu(z9), so)
             voltages[ts, :, :] = v
         return voltages,self.w1,self.w2
 
@@ -179,9 +205,8 @@ class LIFConvNet(torch.nn.Module):
         x = self.constant_current_encoder(
             x.view(-1,self.input_features) * self.input_scale
         )
-        x = x.reshape(self.seq_length, batch_size, 2, 28, 28)
         x = spike_latency_encode(x)
-        x = x.reshape(self.seq_length, batch_size, 2, 28, 28)
+        x = x.reshape(self.seq_length, batch_size, 1, 240, 160)
         voltages,w1,w2 = self.cnn(x)
         m, index = torch.max(voltages, 0)        
         log_p_y = torch.nn.functional.log_softmax(m, dim=1)
@@ -273,13 +298,14 @@ def main(args):
 
     kwargs = {"num_workers": 1, "pin_memory": True} if args.device == "cuda" else {}
     train_loader = torch.utils.data.DataLoader(
-        torchvision.datasets.MNIST(
+        torchvision.datasets.Caltech101(
             root=".",
-            train=True,
             download=True,
             transform=torchvision.transforms.Compose(
                 [
                     torchvision.transforms.PILToTensor(),
+                    torchvision.transforms.Resize((240,160)),
+                    torchvision.transforms.Grayscale(1)
                     
                 ]
             ),
@@ -290,7 +316,7 @@ def main(args):
         **kwargs,
     )#torchvision.transforms.Normalize((0.1307,), (0.3081,))
 
-    input_features = 28 * 28
+    input_features = 240 * 160
 
     model = LIFConvNet(
         input_features,
