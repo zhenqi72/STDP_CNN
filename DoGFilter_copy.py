@@ -14,12 +14,12 @@ class DoGFilter(nn.Module):
         
     def forward(self, x):
         # create gaussin kernel2
-        x1 = gaussian_filter(x,self.sigma1,radius=2)
-        x2 = gaussian_filter(x,self.sigma2,radius=2)
+        x1 = gaussian_filter(x,self.sigma1,radius=3)
+        x2 = gaussian_filter(x,self.sigma2,radius=3)
         x1 = torch.from_numpy(x1)
         x2 = torch.from_numpy(x2)
         x_on = x1 - x2 #on center filter 
         x_off = x2 - x1#off center filter
         x = torch.cat((x_on, x_off), dim=1)
         #print("x size",x.size())
-        return x
+        return x_on

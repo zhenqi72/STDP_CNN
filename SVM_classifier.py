@@ -23,6 +23,7 @@ def multiclass_hinge_loss(outputs, labels):
     correct_scores = correct_scores.view(len(labels),1)
     correct_scores = correct_scores.repeat(1,10)
     margins = torch.clamp(1 - (correct_scores - outputs), min=0)
+    print("margins size",margins.shape)
     margins[torch.arange(len(labels)), labels] = 0  # 正确标签的损失设置为0
     loss = margins.sum() / len(labels)
     
