@@ -11,30 +11,37 @@ class MultiClassSVM(nn.Module):
     def forward(self, x):
         return self.linear(x)
     
-def hinge_loss(outputs, labels):
+def multiclass_hinge_loss(outputs, labels):
+    # 获取类别数
     num_classes = outputs.size(1)
-    correct_indices = labels.view(-1, 1)
-    correct_scores = outputs.gather(1, correct_indices)
+
+    # 正确标签类别的得分
+    correct_scores = outputs[torch.arange(len(labels)), labels].unsqueeze(1)
+
+    # 计算合页损失
     margins = torch.clamp(1 - (correct_scores - outputs), min=0)
-    margins.scatter_(1, correct_indices, 0)
-    loss = margins.mean()
+    margins[torch.arange(len(labels)), labels] = 0  # 正确标签的损失设置为0
+    loss = margins.sum() / len(labels)
+    
     return loss
 
 def train(
     model,
     train_loader,    
     ):
+    optimizer = optim.SGD(model.parameters(), lr=0.01)
     for batch_idx, (data, target) in enumerate(train_loader):
+        optimizer.zero_grad()
         output = model(data)
-        loss = hinge_loss(output, target)
+        loss = multiclass_hinge_loss(output, target)
         loss.backward()
+        optimizer.step()
         _, argmax = torch.max(output, 1)
         accuracy = (target == argmax.squeeze()).float().mean()
-        print("accuracy is",accuracy)
+        print("for epoch {} accuracy is",batch_idx,accuracy)
 
 def main():
     svm = MultiClassSVM(input_size=28,num_classes=10)
-    kwargs = {"num_workers": 1, "pin_memory": True} if args.device == "cuda" else {}
     train_loader = torch.utils.data.DataLoader(
         torchvision.datasets.MNIST(
             root=".",
@@ -42,15 +49,14 @@ def main():
             download=True,
             transform=torchvision.transforms.Compose(
                 [
-                    torchvision.transforms.PILToTensor(),
-                    
+                    torchvision.transforms.ToTensor(),
+                    torchvision.transforms.Resize((28,28))                    
                 ]
             ),
             
         ),
         batch_size=64,
-        shuffle=True,
-        **kwargs,
+        shuffle=True
     )
     test_loader = torch.utils.data.DataLoader(
         torchvision.datasets.MNIST(
@@ -64,8 +70,9 @@ def main():
             ),
         ),
         batch_size=64,
-        **kwargs,
+        
     )
     train(svm,train_loader)
 
-
+if __name__ == "__main__":
+    main()
