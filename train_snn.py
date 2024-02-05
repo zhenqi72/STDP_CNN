@@ -64,9 +64,9 @@ class ConvNet_STDP(torch.nn.Module):
         self.pool_size1 =7
         self.pool_size2 =2
         
-        self.fc1 = torch.nn.Linear(100, 50)
+        self.fc1 = torch.nn.Linear(320, 50)
         self.maxpool1 = torch.nn.MaxPool2d((self.pool_size1,self.pool_size1),self.pool_strd1)
-        self.maxpool2 = torch.nn.MaxPool2d((self.pool_size1,self.pool_size1),self.pool_strd2)
+        self.maxpool2 = torch.nn.MaxPool2d((self.pool_size2,self.pool_size2),self.pool_strd2)
         self.gpool = torch.nn.AdaptiveMaxPool2d((1))
         self.out = LILinearCell(50, 10)
         
@@ -133,18 +133,17 @@ class ConvNet_STDP(torch.nn.Module):
             with torch.no_grad():
                 
                 #first conv layer
-                print("size of x",x[ts, :].shape)  
-                z2 = self.conv2d1(x[ts, :])              
+                z2 = self.conv2d1(x[ts, :])
                 z2, s1 = self.if1(z2, s1)         
                 z3 = self.maxpool1(z2)
 
                 #second conv layer
-                z4 = self.conv2d2(z3)
-                z5, s2 = self.if2(z4, s2)                                     
+                z4 = self.conv2d2(z3)               
+                z5, s2 = self.if2(z4, s2)                                    
                 z6 = self.maxpool2(z5)
                 
                 #third conv layer
-                z7 = self.conv2d3(z6)
+                z7 = self.conv2d3(z6)                
                 z8, s3 = self.if3(z7,s3)
                 z9 = self.gpool(z8)     
 
@@ -174,7 +173,7 @@ class ConvNet_STDP(torch.nn.Module):
                 self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
                                               
 
-            z9 = z9.view(-1,10)
+            z9 = z9.view(-1,z9.shape[0]*z9.shape[1])
             #full connect layer                   
             z9 = self.fc1(z9)    
                         
@@ -229,13 +228,16 @@ def train_snn(
     step = batch_len * epoch
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
 
-    for batch_idx, (data, target) in enumerate(train_loader):        
+    for batch_idx, (data, target) in enumerate(train_loader):  
+        if len(data) !=  32:
+            continue    
         data = dogfilter(data)       
         #print("data after DoG filter",data) 
               
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output,w1,w2 = model(data)
+        
         print(
                     "Train Epoch: {}/{} [{}/{} ({:.0f}%)] ".format(
                         epoch,
@@ -352,7 +354,7 @@ def main(args):
     np.save("w2.npy", np.array(w2))
        
 
-    model_path = "mnist-snn.pt"    
+    model_path = "caltech-snn.pt"    
     save(
         model_path,
         epoch=epoch,
