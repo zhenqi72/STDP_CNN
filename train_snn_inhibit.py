@@ -164,11 +164,10 @@ class ConvNet_STDP(torch.nn.Module):
                 np.save("z5.npy", np.array(z5))
                 print("finish")                                      
                 z6 = self.maxpool2(z5)
-                np.save("w2.npy", np.save(self.w2))
+                np.save("w2.npy", np.array(self.w2))
                 #third conv layer
                 z7 = self.conv2d3(z6)                
                 z8, s3,v3 = self.if3(z7,s3)
-                print("v3 is",v3[0])
                 z8,mask3 = self.later3(z8,mask3,ts)
                 z9 = self.gpool(z8)     
 

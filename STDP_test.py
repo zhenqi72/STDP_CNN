@@ -2,22 +2,31 @@ from STDP_selfmade import STDP_learning,get_update_index,delta_t
 import torch
 import numpy as np
 
-mask1  = np.load("mask1.npy")
-mask2  = np.load("mask2.npy")
-s2  = np.load("s2.npy")
-s5  = np.load("s5.npy")
-w1  = np.load("w1.npy")
-w2  = np.load("w2.npy")
-z2  = np.load("z2.npy")
-z5  = np.load("z5.npy")
-v2  = np.load("v2.npy")
-v5  = np.load("v5.npy")
+torch.set_printoptions(threshold=torch.inf)
+def main():
+    mask2  = np.load("mask2.npy")
+    s_pre  = np.load("z3.npy")
+    s_cur  = np.load("z5.npy")
+    w  = np.load("w2.npy")
+    v5  = np.load("v5.npy")
+
+    print("mask2 is",mask2)
+    print("s_pre is",s_pre)
+    print("s_cur is",s_cur)
+    print("w is",w)
+    print("v5 is",v5)
 
 
 
+    v5 = torch.from_numpy(v5)
+    maxvel,index = get_update_index(v5,mask2)#get the neuron in current plane to update weight
+    maxind1 = index[0,:,0]
+    maxind2 = index[0,:,1]
+    S_pre_sz = s_pre.shape
 
-maxvel,index = get_update_index(v2,mask2)#get the neuron in current plane to update weight
-maxind1 = index[0,:,0]
-maxind2 = index[0,:,1]
+    w = STDP_learning(S_pre_sz=S_pre_sz,s_pre=s_pre, s_cur=s_cur, w=w, threshold=10,  # Input arrays
+                    maxval=maxvel, maxind1=maxind1, maxind2=maxind2,  # Indices
+                    stride=1, a_minus=0.01, a_plus=0.01)
 
-w = STDP_learning(S_pre_sz=s2.shape,s_cur=s5,w=w,threshold=10,maxval=maxvel,maxind1=maxind1,maxind2=maxind2,stride=1,mask_pre_lay=mask_pre,a_minus=0.1,a_plus=0.1)
+if __name__ == "__main__":
+    main()

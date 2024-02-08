@@ -4,7 +4,8 @@ import torch
 def get_update_index(v,mask):
     v = v*mask #get the neuron that can fire
     maxvel,index = torch.max(input=v,dim=1)
-
+    print("shape of v",v.shape)
+    print("maxvel is",maxvel)
     return maxvel,index
 
 def delta_t(fired,ss):
@@ -13,23 +14,22 @@ def delta_t(fired,ss):
 
 def STDP_learning(S_pre_sz,s_pre, s_cur, w, threshold,  # Input arrays
                   maxval, maxind1, maxind2,  # Indices
-                  stride, mask_pre_lay, a_minus, a_plus):  # Parameters
-    
+                  stride, a_minus, a_plus):  # Parameter
     for i in range(w.shape[0]):
         if maxval[i]>threshold:
-            ss=s_cur[0,i,maxind1[i],maxind2[i]]
+            # Select the input  
             if maxind2[i]*stride >= S_pre_sz[3] - w.shape[2] and maxind1[i]*stride >= S_pre_sz[2] - w.shape[1]:
-                fired = mask_pre_lay[0,i,maxind1[i] * stride:, maxind2[i] * stride: ]
+                input = s_pre[0,i,maxind1[i] * stride:, maxind2[i] * stride: ]
             elif maxind2[i]*stride >= S_pre_sz[1] - w.shape[2]:
-                fired = mask_pre_lay[0,i,maxind1[i] * stride:maxind1[i] * stride + w.shape[0], maxind2[i] * stride:]
+                input = s_pre[0,i,maxind1[i] * stride:maxind1[i] * stride + w.shape[0], maxind2[i] * stride:]
             elif maxind1[i]*stride >= S_pre_sz[0] - w.shape[0]:
-                fired = mask_pre_lay[0,i,maxind1[i] * stride:, maxind2[i] * stride:maxind2[i] * stride + w.shape[2]]
+                input = s_pre[0,i,maxind1[i] * stride:, maxind2[i] * stride:maxind2[i] * stride + w.shape[2]]
             else:
-                fired = mask_pre_lay[0,i,maxind1[i] * stride:maxind1[i]*stride+w.shape[1], maxind2[i]*stride:maxind2[i]*stride+w.shape[2]]
-                
-            d_t = delta_t(fired,ss)
-            dw = d_t * a_minus * w[i, :, :] * (1 - w[i, :, :]) + \
-                d_t * a_plus * w[i, :, :] * (1 - w[i, :, :]) - \
+                input = s_pre[0,i,maxind1[i] * stride:maxind1[i]*stride+w.shape[1], maxind2[i]*stride:maxind2[i]*stride+w.shape[2]]
+            # In the paper, it assume that neuron spike either before or after the post-neuron. So, if the 
+                #neuron did input 1 that means it will LTD.
+            dw = input * a_minus * w[i, :, :] * (1 - w[i, :, :]) + \
+                input * a_plus * w[i, :, :] * (1 - w[i, :, :]) - \
                 a_minus * w[i, :, :] * (1 - w[i, :, :])
 
             w[i,:] = w[i,:]+dw
