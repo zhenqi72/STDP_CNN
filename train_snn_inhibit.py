@@ -130,6 +130,7 @@ class ConvNet_STDP(torch.nn.Module):
 
         # specify the initial states
         s0, s1, s2, s3,s4, so = None, None, None, None,None,None
+        v1,v2,v3,v4 = None,None,None,None
         t_pre1,t_pre2,t_post1,t_post2 = None,None,None,None
         state1,state2,state3 = None,None,None
 
@@ -148,20 +149,22 @@ class ConvNet_STDP(torch.nn.Module):
                 #first conv layer
                 z2 = self.conv2d1(x[ts, :])
                 #s is the voltage of neurons
-                z2, s1 = self.if1(z2, s1)
-                print("result of s1",s1[0])
+                z2, s1,v1 = self.if1(z2, s1)
+                print("v1 is",v1[0])
                 z2,mask1 = self.later1(z2,mask1,ts)      
                 z3 = self.maxpool1(z2)
 
                 #second conv layer
                 z4 = self.conv2d2(z3)               
-                z5, s2 = self.if2(z4, s2)
+                z5, s2,v2 = self.if2(z4, s2)
+                print("v2 is",v2[0,0])
                 z5,mask2 = self.later2(z5,mask2,ts)                                    
                 z6 = self.maxpool2(z5)
                 
                 #third conv layer
                 z7 = self.conv2d3(z6)                
-                z8, s3 = self.if3(z7,s3)
+                z8, s3,v3 = self.if3(z7,s3)
+                print("v3 is",v3[0])
                 z8,mask3 = self.later3(z8,mask3,ts)
                 z9 = self.gpool(z8)     
 
