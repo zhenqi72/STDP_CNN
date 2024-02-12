@@ -147,28 +147,28 @@ class ConvNet_STDP(torch.nn.Module):
             with torch.no_grad():
                 
                 #first conv layer
+                np.save("z1.npy", x[ts, :].numpy())
                 z2 = self.conv2d1(x[ts, :])
                 #s is the voltage of neurons
-                z2,s1,v1 = self.if1(z2, s1)               
-                z2,mask1 = self.later1(z2,mask1,ts)     
+                z2,s1,v1 = self.if1(z2, s1)    
+                np.save("s1.npy", np.array(s1.v))
+                np.save("v1.npy", np.array(v1))           
+                z2,mask1 = self.later1(z2,mask1,ts,v1)     
                 z3 = self.maxpool1(z2)
-                np.save("z3.npy", np.array(z3))
-                
+                np.save("mask1.npy",np.array(mask1))                
+                np.save("z2.npy", np.array(z2))
+                print("finish")   
+                np.save("w1.npy", np.array(self.w1))
                 #second conv layer
                 z4 = self.conv2d2(z3)               
                 z5, s2,v2 = self.if2(z4, s2)
-                np.save("s5.npy", np.array(s2.v))
-                np.save("v5.npy", np.array(v2))
-                z5,mask2 = self.later2(z5,mask2,ts)  
-                np.save("mask2.npy",np.array(mask2))                
-                np.save("z5.npy", np.array(z5))
-                print("finish")                                      
+                z5,mask2 = self.later2(z5,mask2,ts,v2)        
                 z6 = self.maxpool2(z5)
-                np.save("w2.npy", np.array(self.w2))
+            
                 #third conv layer
                 z7 = self.conv2d3(z6)                
                 z8, s3,v3 = self.if3(z7,s3)
-                z8,mask3 = self.later3(z8,mask3,ts)
+                z8,mask3 = self.later3(z8,mask3,ts,v3)
                 z9 = self.gpool(z8)     
 
                 if state1 == None:                    

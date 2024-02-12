@@ -2,15 +2,13 @@ import numpy as np
 import torch
 
 def get_update_index(v,mask):
-    v = v*mask #get the neuron that can fire
+    v = v*mask #get the neuron that can fire for each layer
     maxvel,index = torch.max(input=v.view(v.shape[0],v.shape[1],-1),dim=2)
+    mask = mask.view(mask.shape[0],mask.shape[1],-1)
+    print("mask in {} is{}".format(index,mask[:,:,index]))
     #print("index is",index)
-    maxind1 = torch.squeeze(index % v.shape[2],0)
-    maxind2 = torch.squeeze(index // v.shape[3],0)
-    #print("shape of v",v.shape)
-    #print("maxvel is",maxvel)
-    #print("maxind1 is",maxind1)
-    #print("maxind2 is",maxind2)
+    maxind1 = torch.squeeze(index // v.shape[3],0)
+    maxind2 = torch.squeeze(index %  v.shape[3],0)
     return maxvel,maxind1,maxind2
 
 def delta_t(fired,ss):
