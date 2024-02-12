@@ -11,11 +11,18 @@ class Later_inhibt(torch.nn.Module):
         self.mask = torch.ones(input_size)
         
         
-    def forward(self, x, mask,m):
+    def forward(self, x, mask,m,v):
         
         if m == 0 :
+            v = torch.tensor(v)
+            #select the neurons that have the highest value in every 4 channels
+            _,index = torch.max(input = v,dim=1)
+            print("index shape",index.shape)
+            mask_temp = torch.zeros(v.shape)
+            mask_temp[:,index,:,:] = 1
+            mask = mask * mask_temp
             mask = mask*x
-            return x, mask
+            return x, mask,
         else:
             mask_temp = self.mask*x #create temparl mask to get fired neuron in this time 
             mask2 = mask_temp + mask # combine with previous mask to see which neuron were add or have to be inhibited
