@@ -5,7 +5,7 @@ def get_update_index(v,mask):
     v = v*mask #get the neuron that can fire for each layer
     maxvel,index = torch.max(input=v.view(v.shape[0],v.shape[1],-1),dim=2)
     mask = mask.view(mask.shape[0],mask.shape[1],-1)
-    print("mask in {} is{}".format(index,mask[:,:,index]))
+    print("mask in {} is{}".format(index[0][0:2],mask[:,:,index[0][0:2]]))
     #print("index is",index)
     maxind1 = torch.squeeze(index // v.shape[3],0)
     maxind2 = torch.squeeze(index %  v.shape[3],0)

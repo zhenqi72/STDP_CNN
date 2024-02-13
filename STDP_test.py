@@ -3,6 +3,7 @@ import torch
 import numpy as np
 
 torch.set_printoptions(threshold=torch.tensor(10000))
+
 def main():
 
     #mask2 is (1, 20, 3, 3)
@@ -32,15 +33,12 @@ def main():
     maxvel = torch.squeeze(maxvel,0)
     S_pre_sz = s_pre.shape
 
-    w_after = STDP_learning(S_pre_sz=S_pre_sz,s_pre=s_pre, s_cur=s_cur, w=w, threshold=1,  # Input arrays
+    w_after = STDP_learning(S_pre_sz=S_pre_sz,s_pre=s_pre, s_cur=s_cur, w=w, threshold=2,  # Input arrays
                     maxval=maxvel, maxind1=maxind1, maxind2=maxind2,  # Indices
                     stride=2, a_minus=0.01, a_plus=0.01)
-    #print("w after",w)
-    #np.savetxt("w after.cvs",np.array(w))
-    #np.savetxt("s_pre.cvs",np.array(s_pre))
-    #np.savetxt("s_cur.cvs",np.array(s_cur))
+    
     not_equal_positions = torch.where(w_after != w)
-    print(not_equal_positions[0],not_equal_positions[1])
+    print("different w position",not_equal_positions[0],not_equal_positions[1])
 
 if __name__ == "__main__":
     main()

@@ -17,9 +17,10 @@ class Later_inhibt(torch.nn.Module):
             v = torch.tensor(v)
             #select the neurons that have the highest value in every 4 channels
             _,index = torch.max(input = v,dim=1)
-            print("index shape",index.shape)
             mask_temp = torch.zeros(v.shape)
-            mask_temp[:,index,:,:] = 1
+            for i in range(index.shape[1]):
+                for j in range(index.shape[2]):
+                    mask_temp[:,index[0,i,j],i,j] = 1
             mask = mask * mask_temp
             mask = mask*x
             return x, mask,
