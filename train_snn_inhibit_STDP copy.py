@@ -216,7 +216,10 @@ def train_snn(
     batch_len = len(train_loader)
     step = batch_len * epoch
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
-
+    w1_3_3 =[]
+    w1_2_1 =[]
+    w1_4_5 =[]
+    w1_1_4 =[]
     for batch_idx, (data, target) in enumerate(train_loader):  
         if len(data) !=  batchsize:
             continue    
@@ -226,6 +229,10 @@ def train_snn(
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output,w1,w2 = model(data)
+        w1_3_3.append(w1[1][0][3][3])
+        w1_2_1.append(w1[1][0][2][1])
+        w1_4_5.append(w1[1][0][4][4])
+        w1_1_4.append(w1[1][0][1][4])
         
         print(
                     "Train Epoch: {}/{} [{}/{} ({:.0f}%)] ".format(
@@ -249,7 +256,11 @@ def train_snn(
             fig.ylabel("Membrane Potential")
 
             writer.add_figure("Voltages/output", fig, step)
-    
+    np.save("w1_3_3.npy",w1_3_3)
+    np.save("w1_2_1.npy",w1_2_1)
+    np.save("w1_4_5.npy",w1_4_5)
+    np.save("w1_1_4.npy",w1_1_4)
+
     return output,w1,w2
 
 
