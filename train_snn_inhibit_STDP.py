@@ -11,10 +11,6 @@ from argparse import ArgumentParser
 import os
 import uuid
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-import torch
 import torch.utils.data
 from torch.utils.tensorboard import SummaryWriter
 import torchvision
@@ -33,6 +29,7 @@ from norse.torch.functional.encode import spike_latency_encode
 from DoGFilter_copy  import DoGFilter
 from SVM_classifier import multiclass_hinge_loss,MultiClassSVM
 from Lateral_inhibit import Later_inhibt
+from STDP_selfmade import get_update_index,STDP_learning
 #from DoGFilter  import DoGFilter
 import cv2
 
@@ -85,25 +82,6 @@ class ConvNet_STDP(torch.nn.Module):
         
         self.svm = MultiClassSVM(input_size=self.feature_size,num_classes=2)
         
-        self.stdp_param1 = STDPParameters(
-            eta_plus=0.00004,
-            eta_minus=0.00003,
-            stdp_algorithm="simple",#
-            convolutional = True,
-            ) 
-        self.stdp_param2 = STDPParameters(
-            eta_plus=0.00004,
-            eta_minus=0.00003,
-            stdp_algorithm="simple",#
-            convolutional = True,
-            )
-        self.stdp_param3 = STDPParameters(
-            eta_plus=0.00004,
-            eta_minus=0.00003,
-            stdp_algorithm="simple",#
-            convolutional = True,
-            ) 
-        
         self.w1 = torch.normal(mean=0.8, std=0.05, size=(4,1,5,5))
         self.w2 = torch.normal(mean=0.8, std=0.05, size=(20,4,16,16))
         self.w3 = torch.normal(mean=0.8, std=0.05, size=(10,20,5,5))
@@ -131,8 +109,6 @@ class ConvNet_STDP(torch.nn.Module):
         # specify the initial states
         s0, s1, s2, s3,s4, so = None, None, None, None,None,None
         v1,v2,v3,v4 = None,None,None,None
-        t_pre1,t_pre2,t_post1,t_post2 = None,None,None,None
-        state1,state2,state3 = None,None,None
 
         voltages = torch.zeros(
             seq_length, batch_size, 10, device=x.device, dtype=self.dtype
@@ -147,18 +123,11 @@ class ConvNet_STDP(torch.nn.Module):
             with torch.no_grad():
                 
                 #first conv layer
-                np.save("z1.npy", x[ts, :].numpy())
                 z2 = self.conv2d1(x[ts, :])
                 #s is the voltage of neurons
-                z2,s1,v1 = self.if1(z2, s1)    
-                np.save("s1.npy", np.array(s1.v))
-                np.save("v1.npy", np.array(v1))           
+                z2,s1,v1 = self.if1(z2, s1)             
                 z2,mask1 = self.later1(z2,mask1,ts,v1)     
                 z3 = self.maxpool1(z2)
-                np.save("mask1.npy",np.array(mask1))                
-                np.save("z2.npy", np.array(z2))
-                #print("finish")   
-                np.save("w1_test.npy", np.array(self.w1))
                 #second conv layer
                 z4 = self.conv2d2(z3)               
                 z5, s2,v2 = self.if2(z4, s2)
@@ -169,29 +138,23 @@ class ConvNet_STDP(torch.nn.Module):
                 z8, s3,v3 = self.if3(z7,s3)
                 z8,mask3 = self.later3(z8,mask3,ts,v3)
                 z9 = self.gpool(z8)     
-
-                if state1 == None:                    
-                    t_post1 =  torch.zeros((z2.shape[0], z2.shape[1], z2.shape[2], z2.shape[3]))
-                    t_pre1  =  torch.zeros((x[ts, :].shape[0], x[ts, :].shape[1], x[ts, :].shape[2], x[ts, :].shape[3])) 
-                    state1  =  STDPState(t_pre1,t_post1)               
-
-                self.w1,state1  = stdp_step_conv2d(x[ts, :],z2,self.w1,state1,p_stdp= self.stdp_param1) 
-                self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
-
-                if state2 == None:
-                    t_pre2  = torch.zeros((z3.shape[0], z3.shape[1], z3.shape[2], z3.shape[3]))
-                    t_post2 = torch.zeros((z5.shape[0], z5.shape[1], z5.shape[2], z5.shape[3]))
-                    state2  = STDPState(t_pre2,t_post2)
-
-                self.w2,state2 = stdp_step_conv2d(z3,z5,self.w2,state2,p_stdp= self.stdp_param2)
-                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
                 
-                if state3 == None:
-                    t_pre3  = torch.zeros((z6.shape[0], z6.shape[1], z6.shape[2], z6.shape[3]))
-                    t_post3 = torch.zeros((z8.shape[0], z8.shape[1], z8.shape[2], z8.shape[3]))
-                    state3  = STDPState(t_pre3,t_post3)
+                maxvel1,maxind11,maxind21= get_update_index(v1,mask1)  
+                self.w1  = STDP_learning(S_pre_sz=x[ts,:].shape,s_pre=x[ts,:], s_cur=z2, w=self.w1, threshold=10,  # Input arrays
+                  maxval=maxvel1, maxind1=maxind11, maxind2=maxind21,  # Indices
+                  stride=1, a_plus=0.004,a_minus=0.003) 
+                self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
+                
+                maxvel2,maxind12,maxind22= get_update_index(v2,mask2)  
+                self.w2  = STDP_learning(S_pre_sz=z3.shape,s_pre=z3, s_cur=z5, w=self.w2, threshold=60,  # Input arrays
+                  maxval=maxvel2, maxind1=maxind12, maxind2=maxind22,  # Indices
+                  stride=1, a_plus=0.004,a_minus=0.003)
+                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
 
-                self.w3,state3 = stdp_step_conv2d(z6,z8,self.w3,state3,p_stdp= self.stdp_param3)
+                maxvel3,maxind13,maxind23= get_update_index(v3,mask3) 
+                self.w3  = STDP_learning(S_pre_sz=z6.shape,s_pre=z6, s_cur=z8, w=self.w3, threshold=2,
+                  maxval=maxvel3, maxind1=maxind13, maxind2=maxind23, 
+                  stride=1, a_plus=0.004,a_minus=0.003)
                 self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
                                               
 
@@ -335,19 +298,26 @@ def main(args):
                 ]
             ),
         )
-    selected_classes = [0]
+    
+    selected_classes = [38]#67
+    
     index = []
+    b_i = None
     for i,(_,label) in enumerate(dataset):
         if label in selected_classes:
             index.append(i)
     sub_dataset = torch.utils.data.Subset(dataset, index)
-    
+    print("sub_dataset.dataset.__getitem__(0)[0]",sub_dataset.dataset.__getitem__(0)[0])
+
     train_loader = torch.utils.data.DataLoader(
         sub_dataset,
         batch_size=args.batch_size,
         shuffle=True,
         **kwargs,
     )
+
+
+
     input_features = 240 * 160
 
     model = LIFConvNet(

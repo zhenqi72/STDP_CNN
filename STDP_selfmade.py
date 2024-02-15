@@ -5,7 +5,7 @@ def get_update_index(v,mask):
     v = v*mask #get the neuron that can fire for each layer
     maxvel,index = torch.max(input=v.view(v.shape[0],v.shape[1],-1),dim=2)
     mask = mask.view(mask.shape[0],mask.shape[1],-1)
-    print("mask in {} is{}".format(index[0][0:2],mask[:,:,index[0][0:2]]))
+    #print("mask in {} is{}".format(index[0][0:2],mask[:,:,index[0][0:2]]))
     #print("index is",index)
     maxind1 = torch.squeeze(index // v.shape[3],0)
     maxind2 = torch.squeeze(index %  v.shape[3],0)
@@ -17,8 +17,9 @@ def delta_t(fired,ss):
 
 def STDP_learning(S_pre_sz,s_pre, s_cur, w, threshold,  # Input arrays
                   maxval, maxind1, maxind2,  # Indices
-                  stride, a_minus, a_plus):  # Parameter
+                  stride, a_plus,a_minus ):  # Parameter
     for i in range(w.shape[0]):
+        maxval=torch.squeeze(maxval,0)
         if maxval[i]>threshold:
             # Select the input  
             input = torch.zeros(w[i,:, :, :].shape)
@@ -42,7 +43,7 @@ def STDP_learning(S_pre_sz,s_pre, s_cur, w, threshold,  # Input arrays
             dw = input * a_minus * w[i, :, :] * (1 - w[i, :, :]) + \
                 input * a_plus * w[i, :, :] * (1 - w[i, :, :]) - \
                 a_minus * w[i, :, :] * (1 - w[i, :, :])
-
             w[i,:] = w[i,:]+dw
+
     
     return torch.tensor(w)

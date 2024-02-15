@@ -13,16 +13,17 @@ def main():
     mask1 = torch.tensor(mask1)
     s_pre  = np.load("z1.npy")
     s_cur  = np.load("z2.npy")
+    s_cur = torch.tensor(s_cur)
     
-    w   = np.load("w1.npy")
+    w   = np.load("w1_test.npy")
     w   = torch.tensor(w)
     v1  = np.load("v1.npy")
     v1  = torch.from_numpy(v1)
     
     print("mask1 is",mask1)
     print("s_pre is",s_pre)
-    print("s_cur is",s_cur)
-    print("s_cur fired position",np.where(s_cur != 0))
+    print("s_cur is",s_cur*mask1)
+    print("s_cur fired position",np.where((s_cur*mask1) != 0))
     #print("w is",w)
     #print("v5 is",v5)
 
@@ -35,7 +36,7 @@ def main():
 
     w_after = STDP_learning(S_pre_sz=S_pre_sz,s_pre=s_pre, s_cur=s_cur, w=w, threshold=2,  # Input arrays
                     maxval=maxvel, maxind1=maxind1, maxind2=maxind2,  # Indices
-                    stride=2, a_minus=0.01, a_plus=0.01)
+                    stride=1, a_minus=0.01, a_plus=0.01)
     
     not_equal_positions = torch.where(w_after != w)
     print("different w position",not_equal_positions[0],not_equal_positions[1])
