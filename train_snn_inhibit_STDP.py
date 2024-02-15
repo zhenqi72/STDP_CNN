@@ -30,7 +30,7 @@ from DoGFilter_copy  import DoGFilter
 from SVM_classifier import multiclass_hinge_loss,MultiClassSVM
 from Lateral_inhibit import Later_inhibt
 from STDP_selfmade import get_update_index,STDP_learning
-#from DoGFilter  import DoGFilter
+from Max_pooling_snn import Max_pool_snn
 import cv2
 
           
@@ -66,8 +66,10 @@ class ConvNet_STDP(torch.nn.Module):
         self.batchsize = batchsize
         
         self.fc1 = torch.nn.Linear(batchsize*10, 50)
-        self.maxpool1 = torch.nn.MaxPool2d((self.pool_size1,self.pool_size1),self.pool_strd1)
-        self.maxpool2 = torch.nn.MaxPool2d((self.pool_size2,self.pool_size2),self.pool_strd2)
+        #self.maxpool1 = torch.nn.MaxPool2d((self.pool_size1,self.pool_size1),self.pool_strd1)
+        #self.maxpool2 = torch.nn.MaxPool2d((self.pool_size2,self.pool_size2),self.pool_strd2)
+        self.maxpool1 = Max_pool_snn(kernel_size=(self.pool_size1,self.pool_size1),stride=self.pool_strd1,padding=0)
+        self.maxpool2 = Max_pool_snn(kernel_size=(self.pool_size2,self.pool_size2),stride=self.pool_strd2,padding=0)
         self.gpool = torch.nn.AdaptiveMaxPool2d((1))
         self.out = LILinearCell(50, 10)
         
@@ -118,6 +120,8 @@ class ConvNet_STDP(torch.nn.Module):
         mask1 =torch.ones(self.batchsize,4,236,156)
         mask2 =torch.ones(self.batchsize,20,24,10) 
         mask3 =torch.ones(self.batchsize,10,8,1)  
+        mask1_pool =torch.ones(self.batchsize,4, 39, 25)
+        mask2_pool =torch.ones(self.batchsize,20, 12, 5) 
         for ts in range(seq_length):
             #dog filter
             with torch.no_grad():
@@ -127,12 +131,12 @@ class ConvNet_STDP(torch.nn.Module):
                 #s is the voltage of neurons
                 z2,s1,v1 = self.if1(z2, s1)             
                 z2,mask1 = self.later1(z2,mask1,ts,v1)     
-                z3 = self.maxpool1(z2)
+                z3,mask1_pool = self.maxpool1(z2,mask1_pool)
                 #second conv layer
                 z4 = self.conv2d2(z3)               
                 z5, s2,v2 = self.if2(z4, s2)
                 z5,mask2 = self.later2(z5,mask2,ts,v2)        
-                z6 = self.maxpool2(z5)
+                z6,mask2_pool = self.maxpool2(z5,mask2_pool)
                 #third conv layer
                 z7 = self.conv2d3(z6)                
                 z8, s3,v3 = self.if3(z7,s3)
@@ -299,7 +303,7 @@ def main(args):
             ),
         )
     
-    selected_classes = [38]#67
+    selected_classes = [38,39]#67
     
     index = []
     b_i = None
@@ -307,7 +311,6 @@ def main(args):
         if label in selected_classes:
             index.append(i)
     sub_dataset = torch.utils.data.Subset(dataset, index)
-    print("sub_dataset.dataset.__getitem__(0)[0]",sub_dataset.dataset.__getitem__(0)[0])
 
     train_loader = torch.utils.data.DataLoader(
         sub_dataset,
@@ -315,8 +318,6 @@ def main(args):
         shuffle=True,
         **kwargs,
     )
-
-
 
     input_features = 240 * 160
 
@@ -413,7 +414,7 @@ if __name__ == "__main__":
         help="Device to use by pytorch.",
     )
     parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of training episodes to do."
+        "--epochs", type=int, default=20, help="Number of training episodes to do."
     )
     parser.add_argument(
         "--seq-length", type=int, default=30, help="Number of timesteps to do."

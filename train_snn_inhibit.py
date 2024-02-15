@@ -33,6 +33,7 @@ from norse.torch.functional.encode import spike_latency_encode
 from DoGFilter_copy  import DoGFilter
 from SVM_classifier import multiclass_hinge_loss,MultiClassSVM
 from Lateral_inhibit import Later_inhibt
+from Max_pooling_snn import Max_pool_snn
 #from DoGFilter  import DoGFilter
 import cv2
 
