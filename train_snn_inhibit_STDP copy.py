@@ -423,7 +423,7 @@ if __name__ == "__main__":
         help="Device to use by pytorch.",
     )
     parser.add_argument(
-        "--epochs", type=int, default=20, help="Number of training episodes to do."
+        "--epochs", type=int, default=10, help="Number of training episodes to do."
     )
     parser.add_argument(
         "--seq-length", type=int, default=30, help="Number of timesteps to do."

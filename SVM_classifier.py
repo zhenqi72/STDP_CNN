@@ -19,7 +19,6 @@ def multiclass_hinge_loss(outputs, labels):
     # 正确标签类别的得分
     outputs = outputs.squeeze(1)
     correct_scores = outputs[torch.arange(len(labels)), labels]
-    #print("correct_scores size",correct_scores.shape)
     correct_scores = correct_scores.view(len(labels),1)
     correct_scores = correct_scores.repeat(1,10)
     margins = torch.clamp(1 - (correct_scores - outputs), min=0)
@@ -80,5 +79,4 @@ def main():
     )
     train(svm,train_loader)
 
-if __name__ == "__main__":
-    main()
+

@@ -81,8 +81,6 @@ class ConvNet_STDP(torch.nn.Module):
         self.later2 = Later_inhibt(input_size=[batchsize,20,24,10])
         self.later3 = Later_inhibt(input_size=[batchsize,10,8,1])
         
-        self.svm = MultiClassSVM(input_size=self.feature_size,num_classes=2)
-        
         self.w1 = torch.normal(mean=0.8, std=0.05, size=(4,1,5,5))
         self.w2 = torch.normal(mean=0.8, std=0.05, size=(20,4,16,16))
         self.w3 = torch.normal(mean=0.8, std=0.05, size=(10,20,5,5))
@@ -97,7 +95,7 @@ class ConvNet_STDP(torch.nn.Module):
             p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= torch.tensor(60)),
         )
         self.if3 = IAFCell(
-            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= torch.tensor(2)),
+            p=IAFParameters(method=method, alpha=torch.tensor(100.0),v_th= torch.tensor(np.inf)),
         )
 
         self.dtype = dtype
@@ -138,8 +136,8 @@ class ConvNet_STDP(torch.nn.Module):
                 #third conv layer
                 z7 = self.conv2d3(z6)                
                 z8, s3,v3 = self.if3(z7,s3)
-                z8,mask3 = self.later3(z8,mask3,ts,v3)
-                z9 = self.gpool(z8)     
+                #8,mask3 = self.later3(z8,mask3,ts,v3)
+                z9 = self.gpool(v3)     
                 
                 maxvel1,maxind11,maxind21= get_update_index(v1,mask1)  
                 self.w1  = STDP_learning(S_pre_sz=x[ts,:].shape,s_pre=x[ts,:], s_cur=z2, w=self.w1, threshold=10,  # Input arrays
@@ -158,17 +156,12 @@ class ConvNet_STDP(torch.nn.Module):
                   maxval=maxvel3, maxind1=maxind13, maxind2=maxind23, 
                   stride=1, a_plus=0.004,a_minus=0.003)
                 self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
-                                              
-
-            z9 = z9.view(-1,z9.shape[0]*z9.shape[1])
-            #full connect layer                   
-            z9 = self.fc1(z9)    
                         
-            v, so = self.out(torch.nn.functional.relu(z9), so)
-            voltages[ts, :, :] = v
-        return voltages,self.w1,self.w2
+            #v, so = self.out(torch.nn.functional.relu(z9), so)
+            #voltages[ts, :, :] = v
+        return z9,self.w1,self.w2
 
-class LIFConvNet(torch.nn.Module):
+class IF_Model(torch.nn.Module):
     def __init__(
         self,
         input_features,
@@ -178,13 +171,14 @@ class LIFConvNet(torch.nn.Module):
         only_first_spike=False,
         batchsize = 32,
     ):
-        super(LIFConvNet, self).__init__()
+        super(IF_Model, self).__init__()
         self.constant_current_encoder = ConstantCurrentLIFEncoder(seq_length=seq_length)
         self.only_first_spike = only_first_spike
         self.input_features = input_features
         self.cnn = ConvNet_STDP(method=model,batchsize=batchsize)
         self.seq_length = seq_length
         self.input_scale = input_scale
+        self.svm = MultiClassSVM(input_size=self.feature_size,num_classes=2)
 
     def forward(self, x):
         batch_size = x.shape[0]
@@ -194,10 +188,9 @@ class LIFConvNet(torch.nn.Module):
         )
         x = spike_latency_encode(x)
         x = x.reshape(self.seq_length, batch_size, 1, 240, 160)
-        voltages,w1,w2 = self.cnn(x)
-        m, index = torch.max(voltages, 0)        
-        log_p_y = torch.nn.functional.log_softmax(m, dim=1)
-        return log_p_y,w1,w2
+        features,w1,w2 = self.cnn(x)
+        output = self.svm(features)
+        return output,w1,w2
 
 def train_snn(
     model,
@@ -212,7 +205,7 @@ def train_snn(
     writer,
     batchsize,
 ):
-    model.train()
+    #model.train()
     batch_len = len(train_loader)
     step = batch_len * epoch
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
@@ -222,11 +215,17 @@ def train_snn(
             continue    
         data = dogfilter(data)       
         #print("data after DoG filter",data) 
-              
         data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
         output,w1,w2 = model(data)
+        optimizer.zero_grad()
+        loss = multiclass_hinge_loss(output, target)
+        loss.backward()
+        optimizer.step()
+        _, argmax = torch.max(output, 1)
+        accuracy = (target == argmax.squeeze()).float().mean()
+        print("for epoch {} accuracy is {}".format(batch_idx,accuracy))
         
+        """
         print(
                     "Train Epoch: {}/{} [{}/{} ({:.0f}%)] ".format(
                         epoch,
@@ -249,10 +248,9 @@ def train_snn(
             fig.ylabel("Membrane Potential")
 
             writer.add_figure("Voltages/output", fig, step)
+            """
     
-    return output,w1,w2
-
-
+    return accuracy,w1,w2
 
 
 def save(path, epoch, model, optimizer, is_best=False):
@@ -301,10 +299,9 @@ def main(args):
             ),
         )
     
-    selected_classes = [38,39]#67
-    
+    selected_classes = [38,67]#67
     index = []
-    b_i = None
+
     for i,(_,label) in enumerate(dataset):
         if label in selected_classes:
             index.append(i)
@@ -319,7 +316,7 @@ def main(args):
 
     input_features = 240 * 160
 
-    model = LIFConvNet(
+    model = IF_Model(
         input_features,
         args.seq_length,
         input_scale=args.input_scale,
@@ -338,7 +335,7 @@ def main(args):
         optimizer = torch.optim.Adam(model.out.parameters(), lr=args.learning_rate)
     
     for epoch in range(args.epochs):
-        output,w1,w2 = train_snn(
+        accuracy,w1,w2 = train_snn(
             model,
             device,
             train_loader,
@@ -351,6 +348,7 @@ def main(args):
             writer=writer,
             batchsize=args.batch_size,
         )
+    np.save("accuracy,npy",np.array(accuracy))
     np.save("w1.npy", np.array(w1))
     np.save("w2.npy", np.array(w2))
        
@@ -412,7 +410,7 @@ if __name__ == "__main__":
         help="Device to use by pytorch.",
     )
     parser.add_argument(
-        "--epochs", type=int, default=20, help="Number of training episodes to do."
+        "--epochs", type=int, default=15, help="Number of training episodes to do."
     )
     parser.add_argument(
         "--seq-length", type=int, default=30, help="Number of timesteps to do."
