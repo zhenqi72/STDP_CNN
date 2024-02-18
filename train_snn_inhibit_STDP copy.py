@@ -31,7 +31,7 @@ from SVM_classifier import multiclass_hinge_loss,MultiClassSVM
 from Lateral_inhibit import Later_inhibt
 
 from STDP_selfmade import get_update_index,STDP_learning
-from max_pooling_snn import Max_pool_snn
+from Max_pooling_snn import Max_pool_snn
 import cv2
 
           
@@ -216,23 +216,27 @@ def train_snn(
     batch_len = len(train_loader)
     step = batch_len * epoch
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
+    """
     w1_3_3 =[]
     w1_2_1 =[]
     w1_4_5 =[]
     w1_1_4 =[]
+    """
     for batch_idx, (data, target) in enumerate(train_loader):  
         if len(data) !=  batchsize:
             continue    
         data = dogfilter(data)       
         #print("data after DoG filter",data) 
-              
+        np.save("picture after dog",np.array(data))       
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output,w1,w2 = model(data)
+        """
         w1_3_3.append(w1[1][0][3][3])
         w1_2_1.append(w1[1][0][2][1])
         w1_4_5.append(w1[1][0][4][4])
         w1_1_4.append(w1[1][0][1][4])
+        """
         
         print(
                     "Train Epoch: {}/{} [{}/{} ({:.0f}%)] ".format(
@@ -256,10 +260,12 @@ def train_snn(
             fig.ylabel("Membrane Potential")
 
             writer.add_figure("Voltages/output", fig, step)
+    """ 
     np.save("w1_3_3.npy",w1_3_3)
     np.save("w1_2_1.npy",w1_2_1)
     np.save("w1_4_5.npy",w1_4_5)
     np.save("w1_1_4.npy",w1_1_4)
+    """
 
     return output,w1,w2
 
@@ -312,7 +318,7 @@ def main(args):
             ),
         )
     
-    selected_classes = [38,39]#67
+    selected_classes = [0,3]#67,38
     
     index = []
     b_i = None
@@ -423,7 +429,7 @@ if __name__ == "__main__":
         help="Device to use by pytorch.",
     )
     parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of training episodes to do."
+        "--epochs", type=int, default=5, help="Number of training episodes to do."
     )
     parser.add_argument(
         "--seq-length", type=int, default=30, help="Number of timesteps to do."

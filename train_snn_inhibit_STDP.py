@@ -31,7 +31,7 @@ from SVM_classifier import multiclass_hinge_loss,MultiClassSVM
 from Lateral_inhibit import Later_inhibt
 
 from STDP_selfmade import get_update_index,STDP_learning
-from max_pooling_snn import Max_pool_snn
+from Max_pooling_snn import Max_pool_snn
 import cv2
 
           
@@ -126,17 +126,20 @@ class ConvNet_STDP(torch.nn.Module):
                 z2 = self.conv2d1(x[ts, :])
                 #s is the voltage of neurons
                 z2,s1,v1 = self.if1(z2, s1)             
-                z2,mask1 = self.later1(z2,mask1,ts,v1)     
+                z2,mask1 = self.later1(z2,mask1,ts,v1)
+                s1 = mask1*s1     
                 z3,mask1_pool = self.maxpool1(z2,mask1_pool)
                 #second conv layer
                 z4 = self.conv2d2(z3)               
                 z5, s2,v2 = self.if2(z4, s2)
-                z5,mask2 = self.later2(z5,mask2,ts,v2)        
+                z5,mask2 = self.later2(z5,mask2,ts,v2) 
+                s2 = mask2*s2       
                 z6,mask2_pool = self.maxpool2(z5,mask2_pool)
                 #third conv layer
                 z7 = self.conv2d3(z6)                
-                z8, s3,v3 = self.if3(z7,s3)
-                #8,mask3 = self.later3(z8,mask3,ts,v3)
+                z8, s3,v3 = self.if3(z7,s3)                
+                _,mask3 = self.later3(z8,mask3,ts,v3)
+                s3 = mask3*s3
                 z9 = self.gpool(v3)     
                 
                 maxvel1,maxind11,maxind21= get_update_index(v1,mask1)  
@@ -213,8 +216,7 @@ def train_snn(
     for batch_idx, (data, target) in enumerate(train_loader):  
         if len(data) !=  batchsize:
             continue    
-        data = dogfilter(data)       
-        #print("data after DoG filter",data) 
+        data = dogfilter(data)    
         data, target = data.to(device), target.to(device)
         output,w1,w2 = model(data)
         optimizer.zero_grad()
