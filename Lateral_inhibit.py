@@ -22,7 +22,7 @@ class Later_inhibt(torch.nn.Module):
                 for j in range(index.shape[2]):
                     mask_temp[:,index[0,i,j],i,j] = 1
             mask = mask * mask_temp
-            mask = mask*x
+            x = mask*x
             return x, mask,
         else:
             mask_temp = self.mask*x #create temparl mask to get fired neuron in this time 

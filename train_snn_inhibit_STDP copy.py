@@ -128,8 +128,10 @@ class ConvNet_STDP(torch.nn.Module):
                 z2 = self.conv2d1(x[ts, :])
                 #s is the voltage of neurons
                 z2,s1,v1 = self.if1(z2, s1)             
-                z2,mask1 = self.later1(z2,mask1,ts,v1)     
+                z2,mask1 = self.later1(z2,mask1,ts,v1)
+                #np.save("spikes before maxpooling",np.array(z2))     
                 z3,mask1_pool = self.maxpool1(z2,mask1_pool)
+                #np.save("spikes after maxpooling",np.array(z3))     
                 #second conv layer
                 z4 = self.conv2d2(z3)               
                 z5, s2,v2 = self.if2(z4, s2)
@@ -192,8 +194,9 @@ class LIFConvNet(torch.nn.Module):
         x = self.constant_current_encoder(
             x.view(-1,self.input_features) * self.input_scale
         )
-        x = spike_latency_encode(x)
+        x = spike_latency_encode(x)        
         x = x.reshape(self.seq_length, batch_size, 1, 240, 160)
+        #np.save("dog code by spikes.npy",np.array(x))
         voltages,w1,w2 = self.cnn(x)
         m, index = torch.max(voltages, 0)        
         log_p_y = torch.nn.functional.log_softmax(m, dim=1)
@@ -225,18 +228,11 @@ def train_snn(
     for batch_idx, (data, target) in enumerate(train_loader):  
         if len(data) !=  batchsize:
             continue    
-        data = dogfilter(data)       
-        #print("data after DoG filter",data) 
-        np.save("picture after dog",np.array(data))       
+        data = dogfilter(data)     
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output,w1,w2 = model(data)
-        """
-        w1_3_3.append(w1[1][0][3][3])
-        w1_2_1.append(w1[1][0][2][1])
-        w1_4_5.append(w1[1][0][4][4])
-        w1_1_4.append(w1[1][0][1][4])
-        """
+        
         
         print(
                     "Train Epoch: {}/{} [{}/{} ({:.0f}%)] ".format(
@@ -429,10 +425,10 @@ if __name__ == "__main__":
         help="Device to use by pytorch.",
     )
     parser.add_argument(
-        "--epochs", type=int, default=5, help="Number of training episodes to do."
+        "--epochs", type=int, default=3, help="Number of training episodes to do."
     )
     parser.add_argument(
-        "--seq-length", type=int, default=30, help="Number of timesteps to do."
+        "--seq-length", type=int, default=20, help="Number of timesteps to do."
     )
     parser.add_argument(
         "--batch-size",
