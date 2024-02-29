@@ -181,7 +181,7 @@ class IF_Model(torch.nn.Module):
         self.cnn = ConvNet_STDP(method=model,batchsize=batchsize)
         self.seq_length = seq_length
         self.input_scale = input_scale
-        self.svm = MultiClassSVM(input_size=self.feature_size,num_classes=2)
+        self.svm = MultiClassSVM(input_size=10,num_classes=2)
 
     def forward(self, x):
         batch_size = x.shape[0]
@@ -192,6 +192,7 @@ class IF_Model(torch.nn.Module):
         x = spike_latency_encode(x)
         x = x.reshape(self.seq_length, batch_size, 1, 240, 160)
         features,w1,w2 = self.cnn(x)
+        print("size of features",features.shape)
         output = self.svm(features)
         return output,w1,w2
 
