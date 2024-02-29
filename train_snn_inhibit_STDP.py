@@ -1,8 +1,6 @@
-from DoGFilter import DoGFilter
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-
 r"""
 In this task, we train a spiking convolutional network to learn the
 MNIST digit recognition task.
@@ -24,8 +22,7 @@ from norse.torch.module.iaf import IAFCell,IAFParameters,IAFFeedForwardState
 from norse.torch.functional.stdp import STDPState,stdp_step_conv2d,STDPParameters
 from norse.torch.functional.encode import spike_latency_encode
 
-from DoGFilter_copy  import DoGFilter
-from SVM_classifier import multiclass_hinge_loss,MultiClassSVM,binary_hinge_loss
+from DoGFilter_spike  import DoGFilter
 from Lateral_inhibit import Later_inhibt
 
 from STDP_selfmade import get_update_index,STDP_learning
@@ -198,10 +195,10 @@ def train_snn(
 ):
     #model.train()
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
-    ac = []
     x = []
     y = []
     for batch_idx, (data, target) in enumerate(train_loader):  
+
         if len(data) !=  batchsize:
             continue    
         data = dogfilter(data)
@@ -209,20 +206,13 @@ def train_snn(
             target = torch.tensor(1)    
         data, target = data.to(device), target.to(device)
         output,w1,w2,w3 = model(data)
-        #output = output.view(1,2)
+        output = output.view(10)
+        output = output.numpy()
+        #print("output is",output)
         x.append(output)
-        y.append(target)
+        y.append(target.item())
         print("epoch",batch_idx)
-        """
-        optimizer.zero_grad()
-        loss = binary_hinge_loss(output, target)
-        loss.backward()
-        optimizer.step()
-        _, argmax = torch.max(output, 1)
-        accuracy = (target == argmax.squeeze()).float().mean()
-        ac.append(accuracy)
-        ac = []
-        """
+
     x_train = np.array(x[0:1000])
     y_train = np.array(y[0:1000]) 
     x_test = np.array(x[1000:])
@@ -246,14 +236,12 @@ def save(path, epoch, model, optimizer, is_best=False):
         path,
     )
 
-
 def load(path, model, optimizer):
     checkpoint = torch.load(path)
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     model.train()
     return model, optimizer
-
 
 def main(args):
     writer = SummaryWriter()
@@ -385,7 +373,7 @@ if __name__ == "__main__":
         help="Device to use by pytorch.",
     )
     parser.add_argument(
-        "--epochs", type=int, default=15, help="Number of training episodes to do."
+        "--epochs", type=int, default=5, help="Number of training episodes to do."
     )
     parser.add_argument(
         "--seq-length", type=int, default=30, help="Number of timesteps to do."
