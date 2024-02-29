@@ -17,16 +17,26 @@ def multiclass_hinge_loss(outputs, labels):
     # 获取类别数
     num_classes = outputs.size(1)
     # 正确标签类别的得分
-    outputs = outputs.squeeze(1)
-    correct_scores = outputs[torch.arange(len(labels)), labels]
-    correct_scores = correct_scores.view(len(labels),1)
-    correct_scores = correct_scores.repeat(1,10)
+    correct_scores = outputs[torch.arange(1), labels]
+    correct_scores = correct_scores.view(1,1)
+    correct_scores = correct_scores.repeat(1,2)
     margins = torch.clamp(1 - (correct_scores - outputs), min=0)
     print("margins size",margins.shape)
-    margins[torch.arange(len(labels)), labels] = 0  # 正确标签的损失设置为0
-    loss = margins.sum() / len(labels)
+    margins[torch.arange(1), labels] = 0  # 正确标签的损失设置为0
+    loss = margins.sum() / 1
     
     return loss
+import torch
+
+def binary_hinge_loss(outputs, labels):
+    t = 2 * labels - 1  
+    t = t.float()  
+    y = outputs[torch.arange(outputs.size(0)), labels]
+    loss = torch.clamp(1 - t * y, min=0)
+    
+    # 返回平均损失
+    return loss.mean()
+
 
 def train(
     model,

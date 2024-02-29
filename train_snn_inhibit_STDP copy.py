@@ -128,10 +128,8 @@ class ConvNet_STDP(torch.nn.Module):
                 z2 = self.conv2d1(x[ts, :])
                 #s is the voltage of neurons
                 z2,s1,v1 = self.if1(z2, s1)             
-                z2,mask1 = self.later1(z2,mask1,ts,v1)
-                #np.save("spikes before maxpooling",np.array(z2))     
-                z3,mask1_pool = self.maxpool1(z2,mask1_pool)
-                #np.save("spikes after maxpooling",np.array(z3))     
+                z2,mask1 = self.later1(z2,mask1,ts,v1)   
+                z3,mask1_pool = self.maxpool1(z2,mask1_pool)   
                 #second conv layer
                 z4 = self.conv2d2(z3)               
                 z5, s2,v2 = self.if2(z4, s2)

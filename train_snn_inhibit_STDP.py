@@ -17,22 +17,22 @@ import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 
-from norse.torch.models.conv import ConvNet4
+
 from norse.torch.module.encode import ConstantCurrentLIFEncoder
-from norse.torch.functional.lif import LIFParameters
-from norse.torch.module.lif import LIFCell
 from norse.torch.module.leaky_integrator import LILinearCell
-from norse.torch.module.iaf import IAFCell,IAFParameters
+from norse.torch.module.iaf import IAFCell,IAFParameters,IAFFeedForwardState
 from norse.torch.functional.stdp import STDPState,stdp_step_conv2d,STDPParameters
 from norse.torch.functional.encode import spike_latency_encode
 
 from DoGFilter_copy  import DoGFilter
-from SVM_classifier import multiclass_hinge_loss,MultiClassSVM
+from SVM_classifier import multiclass_hinge_loss,MultiClassSVM,binary_hinge_loss
 from Lateral_inhibit import Later_inhibt
 
 from STDP_selfmade import get_update_index,STDP_learning
 from Max_pooling_snn import Max_pool_snn
 import cv2
+
+from sklearn import svm
 
           
 class ConvNet_STDP(torch.nn.Module):
@@ -52,9 +52,9 @@ class ConvNet_STDP(torch.nn.Module):
         method="super", 
         dtype=torch.float,
         batchsize=32,
+        training = 0,
     ):
         super(ConvNet_STDP, self).__init__()
-        self.train_SNN = True
         #convolution parameters
         self.ken_size1 =5
         self.ken_size2 =16
@@ -81,9 +81,9 @@ class ConvNet_STDP(torch.nn.Module):
         self.later2 = Later_inhibt(input_size=[batchsize,20,24,10])
         self.later3 = Later_inhibt(input_size=[batchsize,10,8,1])
         
-        self.w1 = torch.normal(mean=0.8, std=0.05, size=(4,1,5,5))
-        self.w2 = torch.normal(mean=0.8, std=0.05, size=(20,4,16,16))
-        self.w3 = torch.normal(mean=0.8, std=0.05, size=(10,20,5,5))
+        self.w1 = torch.normal(mean=0.8, std=0.05, size=(4,1,5,5)) 
+        self.w2 = torch.normal(mean=0.8, std=0.05, size=(20,4,16,16)) 
+        self.w3 = torch.normal(mean=0.8, std=0.05, size=(10,20,5,5)) 
         self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
         self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
         self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
@@ -99,6 +99,7 @@ class ConvNet_STDP(torch.nn.Module):
         )
 
         self.dtype = dtype
+        self.training = training
         
 
     def forward(self, x):
@@ -106,13 +107,8 @@ class ConvNet_STDP(torch.nn.Module):
         batch_size = x.shape[1]
 
         # specify the initial states
-        s0, s1, s2, s3,s4, so = None, None, None, None,None,None
-        v1,v2,v3,v4 = None,None,None,None
-
-        voltages = torch.zeros(
-            seq_length, batch_size, 10, device=x.device, dtype=self.dtype
-        )
-        # ConvNet_STDP
+        s0, s1, s2, s3= None, None, None, None
+        v1,v2,v3= None,None,None
 
         mask1 =torch.ones(self.batchsize,4,236,156)
         mask2 =torch.ones(self.batchsize,20,24,10) 
@@ -127,42 +123,43 @@ class ConvNet_STDP(torch.nn.Module):
                 #s is the voltage of neurons
                 z2,s1,v1 = self.if1(z2, s1)             
                 z2,mask1 = self.later1(z2,mask1,ts,v1)
-                s1 = mask1*s1     
+                s1 = mask1*s1
+                s1 = IAFFeedForwardState(s1)    
                 z3,mask1_pool = self.maxpool1(z2,mask1_pool)
                 #second conv layer
                 z4 = self.conv2d2(z3)               
                 z5, s2,v2 = self.if2(z4, s2)
                 z5,mask2 = self.later2(z5,mask2,ts,v2) 
-                s2 = mask2*s2       
+                s2 = mask2*s2
+                s2 = IAFFeedForwardState(s2)     
                 z6,mask2_pool = self.maxpool2(z5,mask2_pool)
                 #third conv layer
                 z7 = self.conv2d3(z6)                
                 z8, s3,v3 = self.if3(z7,s3)                
                 _,mask3 = self.later3(z8,mask3,ts,v3)
                 s3 = mask3*s3
+                s3 = IAFFeedForwardState(s3)
                 z9 = self.gpool(v3)     
-                
-                maxvel1,maxind11,maxind21= get_update_index(v1,mask1)  
-                self.w1  = STDP_learning(S_pre_sz=x[ts,:].shape,s_pre=x[ts,:], s_cur=z2, w=self.w1, threshold=10,  # Input arrays
-                  maxval=maxvel1, maxind1=maxind11, maxind2=maxind21,  # Indices
-                  stride=1, a_plus=0.004,a_minus=0.003) 
-                self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
-                
-                maxvel2,maxind12,maxind22= get_update_index(v2,mask2)  
-                self.w2  = STDP_learning(S_pre_sz=z3.shape,s_pre=z3, s_cur=z5, w=self.w2, threshold=60,  # Input arrays
-                  maxval=maxvel2, maxind1=maxind12, maxind2=maxind22,  # Indices
-                  stride=1, a_plus=0.004,a_minus=0.003)
-                self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
+                if self.training == 1:
+                    maxvel1,maxind11,maxind21= get_update_index(v1,mask1)  
+                    self.w1  = STDP_learning(S_pre_sz=x[ts,:].shape,s_pre=x[ts,:], s_cur=z2, w=self.w1, threshold=10,  # Input arrays
+                    maxval=maxvel1, maxind1=maxind11, maxind2=maxind21,  # Indices
+                    stride=1, a_plus=0.004,a_minus=0.003) 
+                    self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
+                    
+                    maxvel2,maxind12,maxind22= get_update_index(v2,mask2)  
+                    self.w2  = STDP_learning(S_pre_sz=z3.shape,s_pre=z3, s_cur=z5, w=self.w2, threshold=60,  # Input arrays
+                    maxval=maxvel2, maxind1=maxind12, maxind2=maxind22,  # Indices
+                    stride=1, a_plus=0.004,a_minus=0.003)
+                    self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
 
-                maxvel3,maxind13,maxind23= get_update_index(v3,mask3) 
-                self.w3  = STDP_learning(S_pre_sz=z6.shape,s_pre=z6, s_cur=z8, w=self.w3, threshold=2,
-                  maxval=maxvel3, maxind1=maxind13, maxind2=maxind23, 
-                  stride=1, a_plus=0.004,a_minus=0.003)
-                self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
+                    maxvel3,maxind13,maxind23= get_update_index(v3,mask3) 
+                    self.w3  = STDP_learning(S_pre_sz=z6.shape,s_pre=z6, s_cur=z8, w=self.w3, threshold=2,
+                    maxval=maxvel3, maxind1=maxind13, maxind2=maxind23, 
+                    stride=1, a_plus=0.004,a_minus=0.003)
+                    self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
                         
-            #v, so = self.out(torch.nn.functional.relu(z9), so)
-            #voltages[ts, :, :] = v
-        return z9,self.w1,self.w2
+        return z9,self.w1,self.w2,self.w3
 
 class IF_Model(torch.nn.Module):
     def __init__(
@@ -178,10 +175,9 @@ class IF_Model(torch.nn.Module):
         self.constant_current_encoder = ConstantCurrentLIFEncoder(seq_length=seq_length)
         self.only_first_spike = only_first_spike
         self.input_features = input_features
-        self.cnn = ConvNet_STDP(method=model,batchsize=batchsize)
+        self.cnn = ConvNet_STDP(method=model,batchsize=batchsize,training=1)
         self.seq_length = seq_length
         self.input_scale = input_scale
-        self.svm = MultiClassSVM(input_size=10,num_classes=2)
 
     def forward(self, x):
         batch_size = x.shape[0]
@@ -191,70 +187,53 @@ class IF_Model(torch.nn.Module):
         )
         x = spike_latency_encode(x)
         x = x.reshape(self.seq_length, batch_size, 1, 240, 160)
-        features,w1,w2 = self.cnn(x)
-        print("size of features",features.shape)
-        output = self.svm(features)
-        return output,w1,w2
+        features,w1,w2,w3 = self.cnn(x)
+        return features,w1,w2,w3
 
 def train_snn(
     model,
     device,
     train_loader,
-    optimizer,
-    epoch,
-    epochs,
-    do_plot,
-    plot_interval,
-    seq_length,
-    writer,
     batchsize,
 ):
     #model.train()
-    batch_len = len(train_loader)
-    step = batch_len * epoch
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
-
+    ac = []
+    x = []
+    y = []
     for batch_idx, (data, target) in enumerate(train_loader):  
         if len(data) !=  batchsize:
             continue    
-        data = dogfilter(data)    
+        data = dogfilter(data)
+        if target == 3:
+            target = torch.tensor(1)    
         data, target = data.to(device), target.to(device)
-        output,w1,w2 = model(data)
+        output,w1,w2,w3 = model(data)
+        #output = output.view(1,2)
+        x.append(output)
+        y.append(target)
+        print("epoch",batch_idx)
+        """
         optimizer.zero_grad()
-        loss = multiclass_hinge_loss(output, target)
+        loss = binary_hinge_loss(output, target)
         loss.backward()
         optimizer.step()
         _, argmax = torch.max(output, 1)
         accuracy = (target == argmax.squeeze()).float().mean()
-        print("for epoch {} accuracy is {}".format(batch_idx,accuracy))
-        
+        ac.append(accuracy)
+        ac = []
         """
-        print(
-                    "Train Epoch: {}/{} [{}/{} ({:.0f}%)] ".format(
-                        epoch,
-                        epochs,
-                        batch_idx * len(data),
-                        len(train_loader.dataset),
-                        100.0 * batch_idx / len(train_loader)                    
-                    )
-                )
-
-        if do_plot and batch_idx % plot_interval == 0:
-            ts = np.arange(0, seq_length)
-            fig, axs = plt.subplots(4, 4, figsize=(15, 10), sharex=True, sharey=True)
-            axs = axs.reshape(-1)  # flatten
-            for nrn in range(10):
-                one_trace = model.voltages.detach().cpu().numpy()[:, 0, nrn]
-                fig.sca(axs[nrn])
-                fig.plot(ts, one_trace)
-            fig.xlabel("Time [s]")
-            fig.ylabel("Membrane Potential")
-
-            writer.add_figure("Voltages/output", fig, step)
-            """
-    
-    return accuracy,w1,w2
-
+    x_train = np.array(x[0:1000])
+    y_train = np.array(y[0:1000]) 
+    x_test = np.array(x[1000:])
+    y_test = np.array(y[1000:]) 
+    clf = svm.SVC(C=1.0,  gamma='auto')
+    clf.fit(x_train,y_train)
+    # Obtain the Training Error
+    score=clf.score(x_test, y_test)
+    print("accuracy is {}".format(score))         
+        
+    return score,w1,w2
 
 def save(path, epoch, model, optimizer, is_best=False):
     torch.save(
@@ -302,7 +281,7 @@ def main(args):
             ),
         )
     
-    selected_classes = [38,67]#67
+    selected_classes = [0,3]#67
     index = []
 
     for i,(_,label) in enumerate(dataset):
@@ -342,13 +321,6 @@ def main(args):
             model,
             device,
             train_loader,
-            optimizer,
-            epoch,
-            epochs=args.epochs,
-            do_plot=args.do_plot,
-            plot_interval=args.plot_interval,
-            seq_length=args.seq_length,
-            writer=writer,
             batchsize=args.batch_size,
         )
     np.save("accuracy,npy",np.array(accuracy))
