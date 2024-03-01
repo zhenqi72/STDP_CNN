@@ -25,4 +25,16 @@ The mask is used to control the output of the maxpooling.
 Since for each neurons in maxpooling layer, it can only fire for once.
 ## STDP module code:
 STDP_selfmade.py
-## 
+In this code, we have a class STDP_learning.  
+The input S_pre_sz is use to decide the data size from previous layer.  
+The input s_pre is the spikes from previous layer.  
+The input w is the weight of the layer using STDP in last timestep.  
+The maxval is the max value of the neurons which are at the same position but in different layer. Becuase in STDP it also fellow the rule "lateral inhibition" which only allow the most active neuron fire in the same postion.  
+Inputs maxind1 maxind2 are the postion for the max neruon.  
+The input stride is the stride in preivous convolution layer which is used to decide which neruon should be updated.  
+Inputs a_plus a_minus are learning rate for the STDP.  
+The output of STDP_learing  is weight after learning.
+## The main challenge of this reproduction is:
+1. Except for the conlvution layer is finished by Norse package. The other function or layers even though are also included in the Norse package, the layers and modules needed in the paper are total differently. Thus, I have to write them by my self.
+2. The debug for this code is hard since each modules is written by myself not from the standard package, sometimes the data formation should be changed and is hard to fix the problem.
+3. The paper just give the brief structure of their network. SOme details should be chosen by myself.
