@@ -38,3 +38,6 @@ The output of STDP_learing  is weight after learning.
 1. Except for the conlvution layer is finished by Norse package. The other function or layers even though are also included in the Norse package, the layers and modules needed in the paper are total differently. Thus, I have to write them by my self.
 2. The debug for this code is hard since each modules is written by myself not from the standard package, sometimes the data formation should be changed and is hard to fix the problem.
 3. The paper just give the brief structure of their network. SOme details should be chosen by myself.
+## What is current status and what can be improved:
+1. Right now, my network can reach 67% accuracy at the best performance and the average accuracy is 65%.
+2. What can be improved is that check the result of each layer and compare them with paper's result, so that I can increase the accuracy to close to the result from the paper.
