@@ -28,6 +28,7 @@ from STDP_selfmade import get_update_index,STDP_learning
 from Max_pooling_snn import Max_pool_snn
 
 from sklearn import svm
+from tqdm import tqdm
 
           
 class ConvNet_STDP(torch.nn.Module):
@@ -176,12 +177,7 @@ class IF_Model(torch.nn.Module):
 
     def forward(self, x):
         batch_size = x.shape[0]
-        #print("x.shape",x.shape)
-        x = self.constant_current_encoder(
-            x.view(-1,self.input_features) * self.input_scale
-        )
-        x = spike_latency_encode(x)
-        x = x.reshape(self.seq_length, batch_size, 1, 240, 160)
+        x = x.reshape(self.seq_length, batch_size, 1, 240, 160).float()
         features,w1,w2,w3 = self.cnn(x)
         return features,w1,w2,w3
 
@@ -191,12 +187,10 @@ def train_snn(
     train_loader,
     batchsize,
 ):
-    #model.train()
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
     x = []
     y = []
-    for batch_idx, (data, target) in enumerate(train_loader):  
-
+    for batch_idx, (data, target) in tqdm(enumerate(train_loader)):  
         if len(data) !=  batchsize:
             continue    
         data = dogfilter(data)
@@ -209,7 +203,7 @@ def train_snn(
         #print("output is",output)
         x.append(output)
         y.append(target.item())
-        print("epoch",batch_idx)
+        #print("epoch",batch_idx)
 
     x_train = np.array(x[0:1000])
     y_train = np.array(y[0:1000]) 
@@ -373,7 +367,7 @@ if __name__ == "__main__":
         "--epochs", type=int, default=5, help="Number of training episodes to do."
     )
     parser.add_argument(
-        "--seq-length", type=int, default=30, help="Number of timesteps to do."
+        "--seq-length", type=int, default=15, help="Number of timesteps to do."
     )
     parser.add_argument(
         "--batch-size",
