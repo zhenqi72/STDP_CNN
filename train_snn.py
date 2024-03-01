@@ -190,7 +190,7 @@ def train_snn(
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
     x = []
     y = []
-    for batch_idx, (data, target) in tqdm(enumerate(train_loader),ncols=10):  
+    for batch_idx, (data, target) in enumerate(tqdm(train_loader)):  
         if len(data) !=  batchsize:
             continue    
         data = dogfilter(data)
