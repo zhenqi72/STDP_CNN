@@ -190,7 +190,7 @@ def train_snn(
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
     x = []
     y = []
-    for batch_idx, (data, target) in tqdm(enumerate(train_loader)):  
+    for batch_idx, (data, target) in tqdm(enumerate(train_loader),ncols=10):  
         if len(data) !=  batchsize:
             continue    
         data = dogfilter(data)
@@ -200,10 +200,8 @@ def train_snn(
         output,w1,w2,w3 = model(data)
         output = output.view(10)
         output = output.numpy()
-        #print("output is",output)
         x.append(output)
         y.append(target.item())
-        #print("epoch",batch_idx)
 
     x_train = np.array(x[0:1000])
     y_train = np.array(y[0:1000]) 
