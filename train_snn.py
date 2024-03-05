@@ -138,19 +138,19 @@ class ConvNet_STDP(torch.nn.Module):
                 z9 = self.gpool(v3)     
                 if self.training == 1:
                     maxvel1,maxind11,maxind21= get_update_index(v1,mask1)  
-                    self.w1  = STDP_learning(S_pre_sz=x[ts,:].shape,s_pre=x[ts,:], s_cur=z2, w=self.w1, threshold=10,  # Input arrays
+                    self.w1  = STDP_learning(S_pre_sz=x[ts,:].shape,s_pre=x[ts,:], mask=mask1, w=self.w1, threshold=10,  # Input arrays
                     maxval=maxvel1, maxind1=maxind11, maxind2=maxind21,  # Indices
                     stride=1, a_plus=0.004,a_minus=0.003) 
                     self.conv2d1.weight = torch.nn.Parameter(self.w1, requires_grad=False)
                     
                     maxvel2,maxind12,maxind22= get_update_index(v2,mask2)  
-                    self.w2  = STDP_learning(S_pre_sz=z3.shape,s_pre=z3, s_cur=z5, w=self.w2, threshold=60,  # Input arrays
+                    self.w2  = STDP_learning(S_pre_sz=z3.shape,s_pre=z3, mask=mask2, w=self.w2, threshold=60,  # Input arrays
                     maxval=maxvel2, maxind1=maxind12, maxind2=maxind22,  # Indices
                     stride=1, a_plus=0.004,a_minus=0.003)
                     self.conv2d2.weight = torch.nn.Parameter(self.w2, requires_grad=False)
 
                     maxvel3,maxind13,maxind23= get_update_index(v3,mask3) 
-                    self.w3  = STDP_learning(S_pre_sz=z6.shape,s_pre=z6, s_cur=z8, w=self.w3, threshold=2,
+                    self.w3  = STDP_learning(S_pre_sz=z6.shape,s_pre=z6, mask=mask3, w=self.w3, threshold=2,
                     maxval=maxvel3, maxind1=maxind13, maxind2=maxind23, 
                     stride=1, a_plus=0.004,a_minus=0.003)
                     self.conv2d3.weight = torch.nn.Parameter(self.w3, requires_grad=False)
@@ -309,14 +309,7 @@ def main(args):
         )
         np.save("accuracy.npy",np.array(accuracy))
         np.save("w1.npy", np.array(w1))
-        np.save("w2.npy", np.array(w2))
-        
-    """
-    np.save("accuracy.npy",np.array(accuracy))
-    np.save("w1.npy", np.array(w1))
-    np.save("w2.npy", np.array(w2))
-    """
-       
+        np.save("w2.npy", np.array(w2))     
 
     model_path = "caltech-snn.pt"    
     save(
