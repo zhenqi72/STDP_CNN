@@ -188,9 +188,12 @@ def train_snn(
     batchsize,
 ):
     dogfilter = DoGFilter(in_channels=1, sigma1=1,sigma2=2,kernel_size=5)
+    weight1_package = []
+    weight2_package = []
     x = []
     y = []
-    for batch_idx, (data, target) in enumerate(tqdm(train_loader)):  
+    for batch_idx, (data, target) in enumerate(tqdm(train_loader)):
+        
         if len(data) !=  batchsize:
             continue    
         data = dogfilter(data)
@@ -200,6 +203,9 @@ def train_snn(
         output,w1,w2,w3 = model(data)
         output = output.view(10)
         output = output.numpy()
+        if batch_idx%100 == 0:
+            weight1_package.append(w1.numpy())
+            weight2_package.append(w2.numpy())
         x.append(output)
         y.append(target.item())
 
@@ -212,7 +218,7 @@ def train_snn(
     score=clf.score(x_test, y_test)
     print("accuracy is {}".format(score))         
         
-    return score,w1,w2
+    return score,weight1_package,weight2_package  #w1,w2 
 
 def save(path, epoch, model, optimizer, is_best=False):
     torch.save(
@@ -251,11 +257,12 @@ def main(args):
             download=True,
             transform=torchvision.transforms.Compose(
                 [
-                    torchvision.transforms.PILToTensor(),
+                    torchvision.transforms.ToTensor(),
                     torchvision.transforms.Resize((240,160)),
-                    torchvision.transforms.Grayscale(1)                    
+                    torchvision.transforms.Grayscale(1),
+                                     
                 ]
-            ),
+            )
         )
     
     selected_classes = [0,3]#67
@@ -300,9 +307,15 @@ def main(args):
             train_loader,
             batchsize=args.batch_size,
         )
+        np.save("accuracy.npy",np.array(accuracy))
+        np.save("w1.npy", np.array(w1))
+        np.save("w2.npy", np.array(w2))
+        
+    """
     np.save("accuracy.npy",np.array(accuracy))
     np.save("w1.npy", np.array(w1))
     np.save("w2.npy", np.array(w2))
+    """
        
 
     model_path = "caltech-snn.pt"    
